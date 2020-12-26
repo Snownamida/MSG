@@ -1,5 +1,5 @@
 #define block_start 0x8000
-#define block_end 0x8BFF
+#define block_end 0x8B57
 #define sentance_total 2781
 #define sentance_pointer_start 0x1CC5
 

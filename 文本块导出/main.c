@@ -116,13 +116,116 @@ void print_all_sentance(void) {
 		struct string block_string = sentance_number_to_block_string(sentance_number);
 		struct string string_ppu = block_string_to_string_ppu(block_string);
 		struct string string_unicode = string_ppu_to_unicode(string_ppu);
-		printf("%d\t%s\n", sentance_number, string_unicode.string);
+		printf("%d\t%X\t%s\n", sentance_number,sentance_number_to_sentance_pointer(sentance_number), string_unicode.string);
 	}
+}
+
+int main1(void) {
+	print_all_sentance();
 }
 
 int main(int argc, char* argv[]) { 
 	if (argc == 2)ROM_LOC = argv[1];
-	print_all_blocks();
-	print_all_sentance();
+	
+	struct Bytes
+	{
+		unsigned char Byte;
+		bool block_string;
+		bool string;
+		bool text;
+		bool sentance;		
+
+	};
+	
+	struct Bytes* rom = malloc(0x80010 * sizeof(struct Bytes));
+	memset(rom, 0, 0x80010 * sizeof(struct Bytes));
+	FILE* ROM = fopen(ROM_LOC, "rb");
+	if (!ROM) {
+		printf("找不到ROM文件 请将ROM拖放至此程序的图标上");
+		exit(9);
+	}
+
+	for (unsigned int i = 0; i < 0x80010; i++) {
+		rom[i].Byte = getc(ROM);
+	}
+
+	for (int sentance_number = 1; sentance_number <= sentance_total; sentance_number++) {
+		int sentance_pointer = sentance_number_to_sentance_pointer(sentance_number);
+		rom[sentance_pointer].sentance = rom[sentance_pointer+1].sentance= rom[sentance_pointer+2].sentance=true;
+		struct threeByte sentance = unreference_sentance_pointer(sentance_pointer);
+		int block_string_pointer = sentance_to_block_string_pointer(sentance);
+		if (block_string_pointer == 0x5F58)printf("%X的句子你怎么回事", sentance_pointer);
+		for (int i = 0; ; i++) {
+			rom[block_string_pointer + i].block_string = true;
+			if (IS_DOUBLE_BYTE(rom[block_string_pointer+i].Byte)) {
+				i++;
+				rom[block_string_pointer + i].block_string = true;
+				continue;
+			}
+			if (IS_TRIPLE_BYTE(rom[block_string_pointer + i].Byte)) {
+				i++;
+				rom[block_string_pointer + i].block_string = true;
+				i++;
+				rom[block_string_pointer + i].block_string = true;
+				continue;
+			}
+
+			if (rom[block_string_pointer + i].Byte == 0x00 || rom[block_string_pointer + i].Byte == 0x04 || rom[block_string_pointer + i].Byte == 0x06) 	break;
+
+
+		}
+		rom[block_string_pointer].block_string = true;
+		
+	}
+	for (int i = block_start; i <= block_end; i++) {
+		int block = (i > 0x807F) ? i : i - 0x8000;
+		int text_pointer = block_to_text_pointer(block);
+		rom[text_pointer].text = rom[text_pointer+1].text = rom[text_pointer+2].text = true;
+		struct threeByte text = unreference_text_pointer(text_pointer);
+		struct pointer_with_length  string_pointer = text_to_string_pointer(text);
+		if (string_pointer.pointer == 0x8000F)printf("%X的text你怎么回事", text_pointer);
+		if (string_pointer.length >= 32) {
+			printf("%X的字符串太长了大概有问题\n", string_pointer.pointer);
+			continue;
+		}
+		for (int i = 0; i < string_pointer.length; i++) {
+			if (string_pointer.pointer + i >= 0x8000F) {
+				printf("%X的字符串位置不对大概有问题，是text_pointer为%X发出的请求\n", string_pointer.pointer, text_pointer);
+				break;
+			}
+			rom[string_pointer.pointer + i].string = true;
+		}
+	}
+
+
+	for (unsigned int i = 0; i < 0x80010; i += 16) {
+		if ((i - 0x10) % 0x2000 == 0)printf("-----------------------------------------------------------------------------------PRG ROM %02d-----------------------------------------------------------------------------------", (i - 0x10) / 0x2000);
+		if (rom[i].block_string + rom[i].sentance + rom[i].string + rom[i].text > 1)printf("%X出现了重叠，请检查\n",i);
+		printf("\n%05X\t", i);
+		for (int j = 0; j < 16; j++) {
+			printf("%02X\t", rom[i + j].Byte);
+		}
+		printf("\nsentance\t");
+		for (int j = 0; j < 16; j++) {
+			printf("%s\t", (rom[i + j].sentance) ? "▲▲▲▲" : "");
+		}
+
+		printf("\nblkStrn\t");
+		for (int j = 0; j < 16; j++) {
+			printf("%s\t", (rom[i + j].block_string) ? "■■■■■■■" : "");
+		}
+		printf("\ntext\t");
+		for (int j = 0; j < 16; j++) {
+			printf("%s\t", (rom[i + j].text) ? "××××××" : "");
+		}
+		printf("\nstring\t");
+		for (int j = 0; j < 16; j++) {
+			printf("%s\t", (rom[i + j].string) ? "●●●●●●●" : "");
+		}
+		printf("\n");
+	}
+
+	fclose(ROM);
+	free(rom);
 	return 2333;
 }
