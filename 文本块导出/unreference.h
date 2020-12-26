@@ -1,0 +1,4 @@
+struct string unreference_string_pointer(struct pointer_with_length string_ppu_pointer);
+struct threeByte unreference_text_pointer(int text_pointer);
+struct string unreferernce_block_string_pointer(int block_string_pointer);
+struct threeByte unreference_sentance_pointer(int sentance_pointer);

@@ -1,0 +1,15 @@
+﻿  expand_value_in_string.c
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\expand_value_in_string.c(63,10): warning C4013: “strcat”未定义；假设外部返回 int
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\expand_value_in_string.c(64,1): warning C4067: 预处理器指令后有意外标记 - 应输入换行符
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\expand_value_in_string.c(72,1): warning C4067: 预处理器指令后有意外标记 - 应输入换行符
+  main.c
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(76,18): warning C4047: “函数”:“char *const ”与“char *[16]”的间接级别不同
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(76,14): warning C4024: “snprintf”: 形参和实参 1 的类型不同
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(77,49): warning C4047: “函数”:“const char *”与“char *[16]”的间接级别不同
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(77,45): warning C4024: “strcat_s”: 形参和实参 3 的类型不同
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(85,18): warning C4047: “函数”:“char *const ”与“char *[16]”的间接级别不同
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(85,14): warning C4024: “snprintf”: 形参和实参 1 的类型不同
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(86,49): warning C4047: “函数”:“const char *”与“char *[16]”的间接级别不同
+C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\文本块导出\main.c(86,45): warning C4024: “strcat_s”: 形参和实参 3 的类型不同
+  正在生成代码...
+  文本块导出.vcxproj -> C:\Users\snownamida\Desktop\FC\metal slader glory\文本块导出\Debug\文本块导出.exe
