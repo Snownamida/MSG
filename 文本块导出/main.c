@@ -116,16 +116,19 @@ void print_all_sentance(void) {
 		struct string block_string = sentance_number_to_block_string(sentance_number);
 		struct string string_ppu = block_string_to_string_ppu(block_string);
 		struct string string_unicode = string_ppu_to_unicode(string_ppu);
-		printf("%d\t%X\t%s\n", sentance_number,sentance_number_to_sentance_pointer(sentance_number), string_unicode.string);
+		printf("%d\t%X\t%X\t%s\n", sentance_number,sentance_number_to_sentance_pointer(sentance_number), sentance_to_block_string_pointer(unreference_sentance_pointer(sentance_number_to_sentance_pointer(sentance_number))) ,string_unicode.string);
 	}
 }
 
-int main1(void) {
-	print_all_sentance();
+int main(int argc, char* argv[]) {
+	if (argc == 2)ROM_LOC = argv[1];
+	print_rom_structure();
+	//print_all_sentance();
+	return 2333;
 }
 
-int main(int argc, char* argv[]) { 
-	if (argc == 2)ROM_LOC = argv[1];
+int print_rom_structure(void) { 
+	
 	
 	struct Bytes
 	{
@@ -170,7 +173,10 @@ int main(int argc, char* argv[]) {
 				continue;
 			}
 
-			if (rom[block_string_pointer + i].Byte == 0x00 || rom[block_string_pointer + i].Byte == 0x04 || rom[block_string_pointer + i].Byte == 0x06) 	break;
+			if (rom[block_string_pointer + i].Byte == 0x00 
+				//|| rom[block_string_pointer + i].Byte == 0x04
+				//|| rom[block_string_pointer + i].Byte == 0x06
+				) 	break;
 
 
 		}

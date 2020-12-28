@@ -58,9 +58,9 @@ struct string unreferernce_block_string_pointer(int block_string_pointer) {
 	char block;
 
 	for (int i = 0; ; i++) {
-		if (i >= 512) {
-			printf("文字块串居然超过了512字节\n");
-			block_string.length = 512;
+		if (i >= 2048) {
+			printf("文字块串居然超过了2048字节\n");
+			block_string.length = 2048;
 			break;
 		}
 		block_string.string[i] = getc(ROM);
@@ -78,7 +78,10 @@ struct string unreferernce_block_string_pointer(int block_string_pointer) {
 			continue;
 		}
 
-		if (block_string.string[i] == 0x00 || block_string.string[i] == 0x04 || block_string.string[i] == 0x06) {
+		if (block_string.string[i] == 0x00 
+//			|| block_string.string[i] == 0x04
+//			|| block_string.string[i] == 0x06
+			) {
 			block_string.length = i + 1;
 			break;
 		}
