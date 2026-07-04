@@ -20,7 +20,7 @@ FONT = "/System/Library/Fonts/Hiragino Sans GB.ttc"
 CHR0 = 0x10 + 512 * 1024
 TEXT_TABLE = 0x3D5C          # block → text 表（每 block 3 字节）
 STRDATA = 0x4A010            # string_pointer 的基址
-FONT_BANKS = [0, 11, 48]     # 标题/海边/开场机甲 场景字库 bank
+FONT_BANKS = [0]             # 对话框字库 = bank 0（Tilemap 实证：假名 tile $83 @ CHR $0830 落在 bank 0；机甲 CG 在 bank 48，不碰）
 STR_FREE = (0x06010, 0x14239)  # 存放中文字符串的空闲区
 
 TARGET = 62
