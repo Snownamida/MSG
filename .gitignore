@@ -1,5 +1,8 @@
 # 游戏 ROM —— 请自备，切勿提交（版权）
 *.nes
 
+# Python
+__pycache__/
+
 # macOS
 .DS_Store
