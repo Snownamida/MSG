@@ -18,6 +18,7 @@ NMI_PATCH = 0x7EB8F
 SAFE = (0x73604, 0x76000)
 OPENING = range(55, 101)
 FOLD_AFTER = set("。！？")
+NO_FOLD_BEFORE = set("。，、！？…」）】》”’：；~")   # 这些字符前不折行（不拆标点串/句尾）
 
 # 说话人（中文）→ 原版名字块 ID（复用原样字节，含颜色/长度/缩进效果）
 SPEAKER_BLOCK = {
@@ -160,7 +161,10 @@ for n in OPENING:
             bs += bytes([0x09])                 # 复用原版引号块
         else:
             emit_char(bs, ch)
-            if ch in FOLD_AFTER: bs.append(0x02)
+            # 标点后折行：仅当后面还跟着正常文字时才折（不拆散连续标点/句尾 」，避免"散")
+            nxt = text[i] if i < len(text) else ""
+            if ch in FOLD_AFTER and nxt and nxt not in NO_FOLD_BEFORE:
+                bs.append(0x02)
     bs.append(0x00)
     assert p + len(bs) <= SAFE[1], f"安全区溢出 @句{n}"
     addr = p; rom[addr:addr + len(bs)] = bs; p += len(bs)
