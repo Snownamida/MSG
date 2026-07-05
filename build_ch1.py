@@ -98,15 +98,19 @@ for code, ch in zip(CODE_POOL, sorted(glyphs)):
     char2code[ch] = code
     rom[dst + code * 16: dst + code * 16 + 16] = glyph8x8(ch)
 
-# 名字块中文化（保 [00,X] 结构与长度 X → 颜色/缩进不变）
+# 名字块中文化（保 [00,X] 结构与长度 X，且保留原版前导空格 → 名字定位/居中不变，如 忠 与 リ 对齐）
 for bid in NAME_IDS:
     ppu = list(R0.block_ppu(bid)); X = ppu[1]
     cn = JP2CN.get(decode_ppu(bytes(ppu[2:-1])).strip())
     if not cn or any(c not in char2code for c in cn): continue
-    codes = [char2code[c] for c in cn]; pad = X - len(codes) - 1
+    content = ppu[2:]                                   # X 字节，末尾 0x11(「)
+    lead = 0
+    while lead < len(content) and content[lead] == 0xFE: lead += 1   # 原版前导空格数（定位）
+    codes = [char2code[c] for c in cn]
+    pad = X - lead - len(codes) - 1                     # 尾部补空格到 「
     if pad < 0: continue
     sp, _ = R0.string_pointer(R0.read3(R0.text_pointer(bid)))
-    rom[sp:sp + X + 2] = bytes([0x00, X] + codes + [0xFE] * pad + [0x11])
+    rom[sp:sp + X + 2] = bytes([0x00, X] + [0xFE] * lead + codes + [0xFE] * pad + [0x11])
 
 # char block 池（避开名字块/控制/折行/引号 ID）
 RESERVED = NAME_IDS | {0x00, 0x02, 0x08, 0x09} | set(range(0x01, 0x20))
