@@ -5,6 +5,7 @@
 scratch_script.json
 translation/batches/
 translation/out/
+translation/script_zh.tsv
 preview/
 patch_poc.py
 
