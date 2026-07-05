@@ -60,6 +60,8 @@ class Alloc:
 alloc = Alloc(FREE_LO, FREE_HI)
 
 # 1) 唯一码位 → block(双字节) + 单码位串 + text 表项
+# FIXME(任务B重写时处理)：未排除在用块，且上界应为 0x8B54（idx≥0xB54 的表槽
+# 落在句 1108 块串上，见 REVERSING.md）。全量方案改为"一段一块+扩表"后此处作废。
 free_blocks = iter(range(0x8080, 0x8B58))
 code2block = {}
 def block_for(c):

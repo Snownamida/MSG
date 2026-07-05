@@ -74,7 +74,9 @@ def main() -> None:
             elif b < 0x80: used.add(b); i += 1
             else: used.add((b << 8) + raw[i + 1]); i += 2
     # 单字节 block 合法值 = 0x20–0x7F（0x00 终止、0x01–0x1F 与双/三字节控制码冲突，均不可用）
-    free_dbl = [b for b in range(0x8080, 0x8B58) if b not in used]
+    # 双字节上界 0x8B54：text 表 0x3D5C+3*idx 到 idx=0xB53 为止，idx≥0xB54 的槽位
+    # (文件 0x5F58 起) 已是句 1108 的块串数据——0x8B54-0x8B57 是幻影空槽，写入毁句 1108
+    free_dbl = [b for b in range(0x8080, 0x8B54) if b not in used]
     free_sgl = [b for b in range(0x20, 0x80) if b not in used]
     free_blocks = free_dbl + free_sgl
     print(f"合法空 block 槽: 双字节 {len(free_dbl)} + 单字节 {len(free_sgl)} = {len(free_blocks)}")
