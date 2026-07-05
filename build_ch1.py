@@ -26,6 +26,7 @@ JP2CN = {"忠": "忠", "エリナ": "艾莉娜", "あずさ": "梓", "チャー�
 PUNCT_REUSE = {"「": 0x11, "」": 0x12}
 CTRL_RE = re.compile(r"~([0-9A-Fa-f]{2,6})~")
 SETUP_RE = re.compile(r"\{s([0-9A-Fa-f]{2})\}")
+GAP_RE = re.compile(r"\{g([0-9A-Fa-f]{2})\}")
 ICON_RE = re.compile("|".join(re.escape(k) for k in sorted(ICON_REUSE, key=len, reverse=True)))
 
 
@@ -61,7 +62,7 @@ def load_struct(path):
 
 def visible_chars(s):
     """结构化串里需要字模的字符（去掉 ~XXXX~ / {sHH} / / / 图标 / 「」）。"""
-    s = CTRL_RE.sub("", s); s = SETUP_RE.sub("", s); s = ICON_RE.sub("", s)
+    s = CTRL_RE.sub("", s); s = SETUP_RE.sub("", s); s = GAP_RE.sub("", s); s = ICON_RE.sub("", s)
     s = s.replace("/", "")
     return set(s) - set(PUNCT_REUSE)
 
@@ -169,6 +170,8 @@ for n in sorted(include):
         if m: bs += bytes.fromhex(m.group(1)); i = m.end(); continue
         m = SETUP_RE.match(text, i)
         if m: bs.append(int(m.group(1), 16)); i = m.end(); continue           # {sHH} 设置块
+        m = GAP_RE.match(text, i)
+        if m: bs.append(int(m.group(1), 16)); i = m.end(); continue           # {gHH} 空隙块
         if text[i] == "/": bs.append(0x02); i += 1; continue                  # 折行锚（显式）
         m = SPK_RE.match(text, i)
         if m: bs.append(SPEAKER_BLOCK[m.group(1)]); i = m.end(); continue      # 名字块
