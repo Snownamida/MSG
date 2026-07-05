@@ -153,6 +153,9 @@ for n in sorted(include):
     rom[R0.sentence_pointer(n):R0.sentence_pointer(n) + 3] = s3
     done += 1
 
+# 绿字区域用 bank 0（原字体库）渲染——把中文字库也拷进 bank 0，让绿字也显示中文（实验）
+rom[CHR0:CHR0 + 4096] = rom[dst:dst + 4096]
+
 open(OUT, "wb").write(rom)
 a = open(SRC, "rb").read()
 ok = all(a[lo:hi] == rom[lo:hi] for lo, hi in [(0x7FFF0, 0x80010), (0x76300, 0x76400), (0x7C000, 0x7E000)])
