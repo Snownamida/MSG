@@ -17,7 +17,8 @@ from reinsert import solve_text
 from msgtool import Rom, DOUBLE_BYTE, TRIPLE_BYTE
 
 SRC = "Metal Slader Glory (Japan).nes"; OUT = "MSG-8x16.nes"
-FONT = "/System/Library/Fonts/Hiragino Sans GB.ttc"
+# 缝合像素字体 8px：手工 hint，8×8 原生清晰（矢量字硬缩会糊）。OFL 授权，随仓库分发。
+FONT = "fonts/fusion-pixel-8px-monospaced-zh_hans.otf"
 CHR0 = 0x10 + 512 * 1024; NEWBANK = 128
 NMI_PATCH = 0x7EB8F; FREE = 0x73604
 # 两条对话 emit 的上格取值指令（A5 27 = LDA $27 → 09 40 = ORA #$40）
@@ -27,18 +28,21 @@ EMIT_MARK_2 = 0x7DA0C   # $D9FC 逐字即时
 SEGS = ["艾莉娜「这就是这次从阿源", "那儿买来的那台吗总觉得", "挺有意思的呢」"]
 
 
+_FONT = ImageFont.truetype(FONT, 8)   # 像素字体按设计 px 渲染
+
+
 def glyph8x16(ch):
-    """中文字 → (上半 tile, 下半 tile)，各 8×8。plane0 全 FF；plane1 笔画=位清零。"""
-    W, H = 8, 16
-    hi = Image.new("L", (W * 4, H * 4), 0); d = ImageDraw.Draw(hi)
-    f = ImageFont.truetype(FONT, int(H * 4 * 0.95)); bb = d.textbbox((0, 0), ch, font=f)
-    d.text(((W*4-(bb[2]-bb[0]))//2-bb[0], (H*4-(bb[3]-bb[1]))//2-bb[1]), ch, fill=255, font=f)
-    sm = hi.resize((W, H), Image.BILINEAR).point(lambda v: 1 if v > 55 else 0)
+    """中文字 → (上半 tile, 下半 tile)，各 8×8。fusion-8px 原生 8×8，无抗锯齿；
+    竖直居中放进 8×16 格（字占 cell 行 4..11），拆成上下两 tile。
+    plane0 全 FF；plane1 笔画=位清零（黑底紫字，与原字库一致）。"""
+    cell = Image.new("L", (8, 16), 0); d = ImageDraw.Draw(cell); d.fontmode = "1"
+    bb = d.textbbox((0, 0), ch, font=_FONT)
+    d.text(((8 - (bb[2] - bb[0])) // 2 - bb[0], 4), ch, fill=255, font=_FONT)  # y=4 居中
     def tile(oy):
         p1 = bytearray([0xFF] * 8)
         for r in range(8):
             for c in range(8):
-                if sm.getpixel((c, oy + r)): p1[r] &= 0xFF ^ (1 << (7 - c))
+                if cell.getpixel((c, oy + r)) > 127: p1[r] &= 0xFF ^ (1 << (7 - c))
         return bytes([0xFF] * 8) + bytes(p1)
     return tile(0), tile(8)     # (上半 → 0x40+c, 下半 → c)
 
