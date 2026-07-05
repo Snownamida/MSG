@@ -81,8 +81,12 @@ assert rom[NMI_PATCH:NMI_PATCH + 3] == bytes([0xAD, 0x51, 0x04])
 rom[NMI_PATCH:NMI_PATCH + 3] = bytes([0xA9, NEWBANK, 0xEA])
 
 # 字模码池（单 bank；全量需多 bank）
+# UI_TILES: 菜单渲染器直接画的装饰 tile，改内容 UI 就花——0x17='|' 是选项大括号的竖段
+# （上弯(特1)0x15/中点(特2)0x16/下弯(特3)0x18 已被 ICON_REUSE 护住，唯独竖段漏了）。
+UI_TILES = {0x17}
 CODE_POOL = [c for c in list(range(0x10, 0xD0)) + list(range(0xE0, 0xFE))
-             if c not in ICON_REUSE.values() and c not in PUNCT_REUSE.values()]
+             if c not in ICON_REUSE.values() and c not in PUNCT_REUSE.values()
+             and c not in UI_TILES]
 # 名字字必装；对话字逐句累加，超一个 bank 容量的句子跳过（留日文，全量再多 bank）
 glyphs = set()
 for cn in JP2CN.values(): glyphs |= set(cn)
