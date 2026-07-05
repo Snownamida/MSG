@@ -77,12 +77,21 @@ def sentence_chars(text):
     return frozenset(v for k, v in tokenize(text) if k == "ch")
 
 
-def pack_banks(char_sets, cap=CAP):
+def pack_banks(char_sets, cap=CAP, priority=()):
     """first-fit-decreasing 装箱：char_sets={n:frozenset} → (sent_bank{n:b}, bank_chars[set])。
-    超过 cap 的句子（如 380）不装，返回在 oversized 里。"""
-    items = sorted((cs for cs in char_sets.items()), key=lambda kv: -len(kv[1]))
+    超过 cap 的句子（如 380）不装，返回在 oversized 里。
+    priority：这些句子优先占 bank 0（demo 用：把开场幕塞进默认 bank，无需 asm 钩子即可实机看）。"""
     banks = []; sent_bank = {}; oversized = []
-    for n, cs in items:
+    pri = [n for n in priority if n in char_sets]
+    if pri:
+        b0 = set()
+        for n in pri:
+            b0 |= char_sets[n]; sent_bank[n] = 0
+        assert len(b0) <= cap, f"优先幕唯一字 {len(b0)} > {cap}"
+        banks.append(b0)
+    rest = sorted((kv for kv in char_sets.items() if kv[0] not in sent_bank),
+                  key=lambda kv: -len(kv[1]))
+    for n, cs in rest:
         if len(cs) > cap:
             oversized.append(n); continue
         best, grow = -1, 1 << 30
@@ -102,7 +111,7 @@ class Encoder:
     TEXT_FREE = (0x5F60, 0x76000)      # PPU 串区（string_pointer 可达）
     BLK_FREE = (0x76000, 0x100010)     # 块串区（扩 PRG 到 1MB）
 
-    def __init__(self, translation, src=SRC):
+    def __init__(self, translation, src=SRC, priority=()):
         self.rom = bytearray(open(src, "rb").read())
         self.R = Rom(bytes(self.rom))
         # 扩 PRG→1MB（块串空间）、扩 CHR→1MB、B 命门
@@ -120,7 +129,7 @@ class Encoder:
         self.tr = translation
         # 1) 装箱
         self.char_sets = {n: sentence_chars(t) for n, t in translation.items() if t}
-        self.sent_bank, self.bank_chars, self.oversized = pack_banks(self.char_sets)
+        self.sent_bank, self.bank_chars, self.oversized = pack_banks(self.char_sets, priority=priority)
         self.nbanks = len(self.bank_chars)
         # 2) 每 bank：拷 bank0（保边框/空白/图标），分配码 + 写字模
         self.b_char2code = []; self.b_code2ch = []
@@ -223,8 +232,14 @@ def load_translation(path="translation/script_zh.tsv"):
 
 
 if __name__ == "__main__":
+    import sys
     tr = load_translation()
-    enc = Encoder(tr)
+    demo = "demo" in sys.argv
+    # demo：把开场幕（句 55-100：做梦→机甲→通电→故障→去店铺）优先塞进 bank 0，
+    # 这样默认 bank 128 就显示开场中文，无需 asm 钩子即可实机验证真实译文管线。
+    priority = range(55, 101) if demo else ()
+    out = "MSG-zh-demo.nes" if demo else "MSG-zh-full.nes"
+    enc = Encoder(tr, priority=priority)
     print(f"装箱：{enc.nbanks} 个字库 bank（CHR {NEWBANK}..{NEWBANK + enc.nbanks - 1}，可用 128），"
           f"超容需拆页的句：{enc.oversized}")
     done = enc.encode_all()
@@ -235,6 +250,10 @@ if __name__ == "__main__":
     if bad:
         n = bad[0]; print("  原:", tr[n][:80]); print("  新:", enc.decode_sentence(n)[:80])
     else:
-        open("MSG-zh-full.nes", "wb").write(enc.rom)
-        print(f"✓ 写出 MSG-zh-full.nes ({len(enc.rom)} bytes)；注：多 bank 切换 asm 钩子尚未加，"
-              f"当前所有句仍读默认 bank {NEWBANK}，仅 bank0 那批句子显示正常")
+        open(out, "wb").write(enc.rom)
+        if demo:
+            b0 = sorted(n for n in enc.sent_bank if enc.sent_bank[n] == 0)
+            print(f"✓ 写出 {out} ({len(enc.rom)} bytes)；bank0(默认显示)含句 {b0[0]}..{b0[-1]} 共 {len(b0)} 句"
+                  f"（开场幕）→ 实机走 NEW GAME 看开场中文；其余幕因未加 bank 钩子会乱码，属预期")
+        else:
+            print(f"✓ 写出 {out} ({len(enc.rom)} bytes)；注：多 bank 钩子未加，仅 bank0 句子正常")
