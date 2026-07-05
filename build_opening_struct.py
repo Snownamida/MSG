@@ -70,18 +70,41 @@ rom[dst:dst + 4096] = rom[CHR0:CHR0 + 4096]
 assert rom[NMI_PATCH:NMI_PATCH + 3] == bytes([0xAD, 0x51, 0x04])
 rom[NMI_PATCH:NMI_PATCH + 3] = bytes([0xA9, NEWBANK, 0xEA])
 
-# 开场对话唯一字（不含被识别为说话人名字的那些）→ 码 + 字模
-# 简化：所有可见字都给字模（名字块走原版，不占这些码）
+# 日文名 → 中文名（名字块中文化，保留 [00,X] 与长度 X → 颜色/缩进不变）
+JP2CN = {"忠": "忠", "エリナ": "艾莉娜", "あずさ": "梓", "チャーミー": "查米",
+         "ゲン": "阿源", "ゲ ン": "阿源", "シルキーヌ": "希尔琪奴", "キャティ": "凯蒂",
+         "エンカイ": "恩凯", "やよい": "弥生", "ウェイトレス": "女服务员",
+         "ジフ": "吉夫", "ジ フ": "吉夫", "小夜子": "小夜子"}
+
+# 引号复用原版 tile（0x11=「 0x12=」，名字块/引号块都用它们，绝不能覆盖成中文）
+PUNCT_REUSE = {"「": 0x11, "」": 0x12}
+
+# 开场对话唯一字 + 所有中文名的字 → 码 + 字模（「」除外，复用原 tile）
 glyphs = set()
 for n in OPENING:
     if tr.get(n): glyphs |= sentence_chars(tr[n])
+for cn in JP2CN.values(): glyphs |= set(cn)
+glyphs -= set(PUNCT_REUSE)
 CODE_POOL = [c for c in list(range(0x10, 0xD0)) + list(range(0xE0, 0xFE))
-             if c not in ICON_REUSE.values()]
+             if c not in ICON_REUSE.values() and c not in PUNCT_REUSE.values()]
 assert len(glyphs) <= len(CODE_POOL)
-char2code = {}
+char2code = dict(PUNCT_REUSE)          # 「」→原 tile（不写字模，保留原字形）
 for code, ch in zip(CODE_POOL, sorted(glyphs)):
     char2code[ch] = code
     rom[dst + code * 16: dst + code * 16 + 16] = glyph8x8(ch)
+
+# 名字块中文化：保留 [00,X] 前缀与长度 X（颜色/缩进/长度全不变），日文名换中文名
+for bid in NAME_IDS:
+    ppu = list(R0.block_ppu(bid)); X = ppu[1]
+    jp = decode_ppu(bytes(ppu[2:-1])).strip()
+    cn = JP2CN.get(jp)
+    if not cn or any(c not in char2code for c in cn): continue   # 空名/图标块保持原样
+    codes = [char2code[c] for c in cn]; pad = X - len(codes) - 1
+    if pad < 0: continue                                          # 中文名太长放不下（demo 无）
+    newppu = bytes([0x00, X] + codes + [0xFE] * pad + [0x11])
+    assert len(newppu) == X + 2
+    sp, _ = R0.string_pointer(R0.read3(R0.text_pointer(bid)))
+    rom[sp:sp + len(newppu)] = newppu
 
 # char block 池：避开所有名字块/控制/折行/引号 ID
 p = SAFE[0]
