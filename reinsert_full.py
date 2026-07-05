@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""全量回写工具（Phase 1：通用 token 编码器 + 单 bank 字库 + round-trip 自验）。
+"""全量回写工具：把整份中文译文回写进 ROM（多 bank 字库 + 三层指针重建 + round-trip 自验）。
 
-消费翻译串（中文 + 原样保留的 ~XXXX~ 控制码 + 保留的特殊图标），重建三层指针链，
-把整份（或子集）译文写进 ROM。相比里程碑2/4 的单句 demo，这里是**任意句、任意文本**的编码器。
+规范格式（与 translation/ 译文一致）：
+- `~HH~`/`~HHHH~`/`~HHHHHH~`：块串层控制码，原样还原字节，不占字模。
+- 特殊图标 token（`(特1)(特2)(特3)(爱心)(音符)(冒汗)★`）：复用每个字库 bank 里保留的原 tile。
+- 其余每个可见字符：分配一个 fusion-8px 字模 tile。
 
-规范格式（与 translation/ 的译文一致）：
-- `~HH~` / `~HHHH~` / `~HHHHHH~`：块串层控制码，原样还原为字节，不占字模。
-- 特殊图标 token（`(特1)(特2)(特3)(爱心)(音符)(冒汗)★`）：复用 bank128 里的原 tile（fusion 画不出）。
-- 其余每个可见字符：分配一个 fusion-8px 字模 tile（原版共享汉字如 忠/日/的 也各给新 tile，简单统一）。
+多 bank 装箱（核心）：整份译文约 1472 唯一字，一个 CHR bank 只有 ~216 可用 tile 码。
+对话框一屏只显示一个 CHR bank，故**同一句的字形必须全在同一 bank**。用 first-fit-decreasing
+把 2781 句装进最少的 bank（实测 CAP=216 → 106 个，< 可用 128），每句记下所属 bank
+（`sent_bank`，供每句渲染前设置 CHR bank 的 asm 钩子使用——那是仅剩的一步）。
 
-编码策略（**每字一个共享 block**，学里程碑 2；不是"每段一块"——那样 block 数=段数会爆表）：
-- 每个唯一字形（中文字/图标）→ 一个双字节 block，其 PPU 串 = 单码位 [tile 码]，全篇复用。
-- 句子块串 = 控制码字节 + 字形 block 序列。block 数 = 唯一字形数（~1500 < 可用 ~2868 槽）。
-- 全量回写=替换整个剧本 → 原字典 block/文本区/块串区全部回收（full-reclaim 模式）。
+编码：每唯一(bank,字)→字模 tile；每 PPU 码 → 一个共享 block（PPU 串=单码位，渲染按激活 bank 取 tile）；
+句块串 = 控制码字节 + 字形 block 序列，重建到扩 PRG 的块串区，句子/text 指针反解。
 
-Phase 1 已验证：编码器 + round-trip。Phase 2 待解：多 bank 字库切换（>256 字形需按 bank 切 CHR）。
+空间布局（避免四结构互撞，均在各自可达范围）：
+  句子表 0x1CC5 / 文本表 0x3D5C / PPU 串区 0x5F60-0x76000 / 块串区 0x76000-0x100010（扩 PRG→1MB）。
 """
 import re
 from PIL import Image, ImageDraw, ImageFont
@@ -22,21 +23,28 @@ from msgtool import Rom, DOUBLE_BYTE, TRIPLE_BYTE
 
 SRC = "Metal Slader Glory (Japan).nes"
 FONT = "fonts/fusion-pixel-8px-monospaced-zh_hans.otf"
-CHR0 = 0x10 + 512 * 1024; NEWBANK = 128
+CHR0 = 0x10 + 512 * 1024
+NEWBANK = 128                       # 字库起始 CHR bank（0-127 = 原版 CG，128+ = 中文字库）
+CAP = 216                           # 每 bank 可用字模码数（保守：预留 0xD0-0xDF 边框区）
 
-# 特殊图标 → 复用原 PPU 码（bank128=bank0 拷贝里就有这些 tile）
+# 特殊图标 → 复用原 PPU 码（每个字库 bank = bank0 拷贝，这些 tile 都在）
 ICON_REUSE = {
     "(特1)": 0x15, "(特2)": 0x16, "(特3)": 0x18,
     "(爱心)": 0x19, "★": 0x1A, "(音符)": 0x1B, "(冒汗)": 0x09,
 }
-ICON_RE = re.compile("|".join(re.escape(k) for k in
-                     sorted(ICON_REUSE, key=len, reverse=True)))
+ICON_RE = re.compile("|".join(re.escape(k) for k in sorted(ICON_REUSE, key=len, reverse=True)))
 CTRL_RE = re.compile(r"~([0-9A-Fa-f]{2,6})~")
+# 码池：0x10-0xCF + 0xE0-0xFD，去掉图标码；预留 0xD0-0xDF(边框) / 0xFE(空白) / 0xFF / 0x00-0x0F(控制)
+CODE_POOL = [c for c in list(range(0x10, 0xD0)) + list(range(0xE0, 0xFE))
+             if c not in ICON_REUSE.values()]
+assert len(CODE_POOL) >= CAP
 
 _FONT = ImageFont.truetype(FONT, 8)
+_GLYPH_CACHE = {}
 
 
 def glyph8x8(ch):
+    if ch in _GLYPH_CACHE: return _GLYPH_CACHE[ch]
     im = Image.new("L", (8, 8), 0); d = ImageDraw.Draw(im); d.fontmode = "1"
     bb = d.textbbox((0, 0), ch, font=_FONT)
     d.text(((8 - (bb[2] - bb[0])) // 2 - bb[0], 0), ch, fill=255, font=_FONT)
@@ -44,11 +52,12 @@ def glyph8x8(ch):
     for r in range(8):
         for c in range(8):
             if im.getpixel((c, r)) > 127: p1[r] &= 0xFF ^ (1 << (7 - c))
-    return bytes([0xFF] * 8) + bytes(p1)
+    g = _GLYPH_CACHE[ch] = bytes([0xFF] * 8) + bytes(p1)
+    return g
 
 
 def tokenize(s):
-    """译文串 → token 列表：('ctrl', bytes) | ('icon', code) | ('ch', 字符)。"""
+    """译文串 → [('ctrl', bytes) | ('icon', code) | ('ch', 字符)]。"""
     out = []; i = 0
     while i < len(s):
         m = CTRL_RE.match(s, i)
@@ -63,65 +72,68 @@ def tokenize(s):
     return out
 
 
-class Encoder:
-    """把译文回写进 ROM 副本。每字共享 block + 三层指针重建。
+def sentence_chars(text):
+    """句子里需要字模的唯一字符集（去控制码/图标）。"""
+    return frozenset(v for k, v in tokenize(text) if k == "ch")
 
-    full_reclaim=True：全量替换整个剧本，原字典 block / 文本区 / 块串区全部可用。
-    """
-    # 布局（避免四结构互撞）：句子表 0x1CC5-0x3D5C；文本表 0x3D5C-最多 0x5F58（全 block 范围）；
-    # PPU 串区放文本表之后、块串之前；块串区在扩 PRG 里（block_string_pointer 可达至 0x10E00F）。
-    TEXT_FREE = (0x5F60, 0x76000)      # PPU 串区（1 码位/字，string_pointer 可达）
+
+def pack_banks(char_sets, cap=CAP):
+    """first-fit-decreasing 装箱：char_sets={n:frozenset} → (sent_bank{n:b}, bank_chars[set])。
+    超过 cap 的句子（如 380）不装，返回在 oversized 里。"""
+    items = sorted((cs for cs in char_sets.items()), key=lambda kv: -len(kv[1]))
+    banks = []; sent_bank = {}; oversized = []
+    for n, cs in items:
+        if len(cs) > cap:
+            oversized.append(n); continue
+        best, grow = -1, 1 << 30
+        for i, b in enumerate(banks):
+            u = len(b | cs)
+            if u <= cap and u - len(b) < grow:
+                grow, best = u - len(b), i
+        if best < 0:
+            banks.append(set(cs)); best = len(banks) - 1
+        else:
+            banks[best] |= cs
+        sent_bank[n] = best
+    return sent_bank, banks, oversized
+
+
+class Encoder:
+    TEXT_FREE = (0x5F60, 0x76000)      # PPU 串区（string_pointer 可达）
     BLK_FREE = (0x76000, 0x100010)     # 块串区（扩 PRG 到 1MB）
 
-    def __init__(self, src=SRC, full_reclaim=True):
+    def __init__(self, translation, src=SRC):
         self.rom = bytearray(open(src, "rb").read())
         self.R = Rom(bytes(self.rom))
-        # 扩 PRG→1MB（块串空间）、扩 CHR→1MB、拷贝 bank0、B 命门
-        self.rom[4] = 64            # PRG 页数 512KB→1MB（16KB/页 × 64）
-        self.rom[5] = 128           # CHR 512KB→1MB
+        # 扩 PRG→1MB（块串空间）、扩 CHR→1MB、B 命门
+        self.rom[4] = 64; self.rom[5] = 128
         prg = bytearray(self.rom[0x10:0x10 + 0x80000]) + bytes(0x80000)
         chr_ = bytearray(self.rom[0x10 + 0x80000:0x10 + 0x100000]) + bytes(0x80000)
         self.rom = bytearray(self.rom[:0x10]) + prg + chr_
-        self.dst = 0x10 + 0x100000 + NEWBANK * 4096   # CHR 现在在 1MB PRG 之后
-        base_chr = 0x10 + 0x100000
-        self.rom[self.dst:self.dst + 4096] = self.rom[base_chr:base_chr + 4096]
+        self.base_chr = 0x10 + 0x100000
         assert self.rom[0x7EB8F:0x7EB8F + 3] == bytes([0xAD, 0x51, 0x04])
-        self.rom[0x7EB8F:0x7EB8F + 3] = bytes([0xA9, NEWBANK, 0xEA])
-        # block 槽：full_reclaim 时单字节 0x20-0x7F + 双字节 0x8080-0x8B53 全可用
-        blocks = list(range(0x20, 0x80))
-        if full_reclaim: blocks += list(range(0x8080, 0x8B54))
-        else:
-            used = self._used_blocks(); blocks = [b for b in blocks if b not in used]
-        self.free_blocks = iter(blocks)
-        self.code_pool = iter(c for c in range(0x10, 0x100)
-                              if c not in (0x0E, 0x0F, 0xFE) and c not in ICON_REUSE.values())
+        self.rom[0x7EB8F:0x7EB8F + 3] = bytes([0xA9, NEWBANK, 0xEA])   # 默认 bank（asm 钩子将改成按句）
+        # block 槽（全量替换 → 原字典全回收）+ 空闲指针
+        self.free_blocks = iter(list(range(0x20, 0x80)) + list(range(0x8080, 0x8B54)))
         self.tp = self.TEXT_FREE[0]; self.bp = self.BLK_FREE[0]
-        self.codes = {}          # 字形 → PPU 码
-        self.code2ch = {}        # 反向（round-trip 用）
-        self.blk_of = {}         # PPU 码 → 共享 block
-
-    def _used_blocks(self):
-        used = set()
-        for n in range(1, 2782):
-            raw = self.R.sentence_blocks(n); i = 0
-            while i < len(raw):
-                b = raw[i]
-                if b in TRIPLE_BYTE: i += 3
-                elif b in DOUBLE_BYTE: i += 2
-                elif b == 0x00: i += 1
-                elif b < 0x80: used.add(b); i += 1
-                else: used.add((b << 8) + raw[i + 1]); i += 2
-        return used
-
-    def _code_for(self, ch):
-        if ch not in self.codes:
-            c = self.codes[ch] = next(self.code_pool)
-            self.code2ch[c] = ch
-            self.rom[self.dst + c * 16: self.dst + c * 16 + 16] = glyph8x8(ch)
-        return self.codes[ch]
+        self.blk_of = {}                   # PPU 码 → 共享 block
+        self.tr = translation
+        # 1) 装箱
+        self.char_sets = {n: sentence_chars(t) for n, t in translation.items() if t}
+        self.sent_bank, self.bank_chars, self.oversized = pack_banks(self.char_sets)
+        self.nbanks = len(self.bank_chars)
+        # 2) 每 bank：拷 bank0（保边框/空白/图标），分配码 + 写字模
+        self.b_char2code = []; self.b_code2ch = []
+        for b, chars in enumerate(self.bank_chars):
+            dst = self.base_chr + (NEWBANK + b) * 4096
+            self.rom[dst:dst + 4096] = self.rom[self.base_chr:self.base_chr + 4096]
+            c2c, c2ch = {}, {}
+            for code, ch in zip(CODE_POOL, sorted(chars)):
+                c2c[ch] = code; c2ch[code] = ch
+                self.rom[dst + code * 16: dst + code * 16 + 16] = glyph8x8(ch)
+            self.b_char2code.append(c2c); self.b_code2ch.append(c2ch)
 
     def _block_for(self, code):
-        """PPU 码 → 共享双字节 block（PPU 串=单码位 [code]），全篇复用。"""
         if code not in self.blk_of:
             if self.tp + 1 > self.TEXT_FREE[1]: raise MemoryError("PPU 串区满")
             self.rom[self.tp] = code
@@ -152,75 +164,77 @@ class Encoder:
             if 0x30 <= b1 <= 0x7F: return bytes([b1, b2, b3])
         return None
 
-    def encode_sentence(self, n, text):
-        """把句 n 重编码为 text（每字形一个共享 block）。原子性：失败抛异常。"""
-        bs = bytearray()
-        for kind, v in tokenize(text):
-            if kind == "ctrl":
-                bs += v
-            else:
-                code = v if kind == "icon" else self._code_for(v)
-                blk = self._block_for(code)
-                bs += bytes([blk]) if blk < 0x80 else bytes([blk >> 8, blk & 0xFF])
-        bs.append(0x00)
-        if self.bp + len(bs) > self.BLK_FREE[1]: raise MemoryError("块串区满")
-        addr = self.bp; self.rom[addr:addr + len(bs)] = bs; self.bp += len(bs)
-        s3 = self._solve_sentence(addr)
-        if s3 is None: raise ValueError(f"块串地址 {addr:X} 不可达")
-        self.rom[self.R.sentence_pointer(n):self.R.sentence_pointer(n) + 3] = s3
+    def encode_all(self):
+        """把所有已装箱句子回写。返回成功句号列表。"""
+        done = []
+        for n in sorted(self.sent_bank):
+            c2c = self.b_char2code[self.sent_bank[n]]
+            bs = bytearray()
+            for kind, v in tokenize(self.tr[n]):
+                if kind == "ctrl":
+                    bs += v
+                else:
+                    code = v if kind == "icon" else c2c[v]
+                    blk = self._block_for(code)
+                    bs += bytes([blk]) if blk < 0x80 else bytes([blk >> 8, blk & 0xFF])
+            bs.append(0x00)
+            if self.bp + len(bs) > self.BLK_FREE[1]: raise MemoryError("块串区满")
+            addr = self.bp; self.rom[addr:addr + len(bs)] = bs; self.bp += len(bs)
+            s3 = self._solve_sentence(addr)
+            if s3 is None: raise ValueError(f"块串 {addr:X} 不可达")
+            self.rom[self.R.sentence_pointer(n):self.R.sentence_pointer(n) + 3] = s3
+            done.append(n)
+        return done
 
     def decode_sentence(self, n):
-        """按我们的 code↔字 映射 + 控制码 token 解码（round-trip 验证用）。"""
+        """按该句所属 bank 的 码↔字 解码（round-trip 验证）。"""
         P = Rom(bytes(self.rom))
         raw = P.sentence_blocks(n); out = []; i = 0
         icon_inv = {v: k for k, v in ICON_REUSE.items()}
+        code2ch = self.b_code2ch[self.sent_bank[n]]
         while i < len(raw):
             b = raw[i]
-            if b in TRIPLE_BYTE:
-                out.append("~" + raw[i:i + 3].hex().upper() + "~"); i += 3
-            elif b in DOUBLE_BYTE:
-                out.append("~" + raw[i:i + 2].hex().upper() + "~"); i += 2
+            if b in TRIPLE_BYTE: out.append("~" + raw[i:i + 3].hex().upper() + "~"); i += 3
+            elif b in DOUBLE_BYTE: out.append("~" + raw[i:i + 2].hex().upper() + "~"); i += 2
             elif b == 0x00: break
             else:
                 blk = b if b < 0x80 else (b << 8) + raw[i + 1]
                 i += 1 if b < 0x80 else 2
                 for c in P.block_ppu(blk):
-                    if c in icon_inv: out.append(icon_inv[c])
-                    elif c in self.code2ch: out.append(self.code2ch[c])
+                    if c in code2ch: out.append(code2ch[c])
+                    elif c in icon_inv: out.append(icon_inv[c])
                     else: out.append(f"?{c:02X}?")
         return "".join(out)
 
 
 def _norm(s):
-    """把控制码统一成大写十六进制，便于 round-trip 比对（原 sentence_text 已是 ~XX~ 形式）。"""
     return re.sub(r"~([0-9A-Fa-f]+)~", lambda m: "~" + m.group(1).upper() + "~", s)
 
 
+def load_translation(path="translation/script_zh.tsv"):
+    tr = {}
+    for line in open(path, encoding="utf-8"):
+        line = line.rstrip("\n")
+        if "\t" in line:
+            ns, zh = line.split("\t", 1); tr[int(ns)] = _norm(zh)
+        elif line.strip().isdigit():
+            tr[int(line.strip())] = ""
+    return tr
+
+
 if __name__ == "__main__":
-    # 自验：拿原文当"译文"喂进去，能塞多少句、round-trip 是否全对
-    R0 = Rom(open(SRC, "rb").read())
-    enc = Encoder()
-    done = 0; first_bad = None
-    try:
-        for n in range(1, 2782):
-            src = _norm(R0.sentence_text(n, codes=True))
-            enc.encode_sentence(n, src)
-            back = _norm(enc.decode_sentence(n))
-            if back != src and first_bad is None:
-                first_bad = (n, src, back)
-            done = n
-    except (MemoryError, ValueError, StopIteration) as e:
-        print(f"容量到顶 @句{done + 1}: {type(e).__name__} {e}")
-    print(f"编码 {done} 句；唯一字模 {len(enc.codes)}；PPU 串用 {enc.tp - enc.TEXT_FREE[0]}B，"
-          f"块串用 {enc.bp - enc.BLK_FREE[0]}B")
-    # round-trip 全查
-    R0 = Rom(open(SRC, "rb").read())
-    bad = []
-    for n in range(1, done + 1):
-        if _norm(enc.decode_sentence(n)) != _norm(R0.sentence_text(n, codes=True)):
-            bad.append(n)
-    print(f"round-trip: {done - len(bad)}/{done} 一致" + (" ✓" if not bad else f"，首个坏句 {bad[0]}"))
+    tr = load_translation()
+    enc = Encoder(tr)
+    print(f"装箱：{enc.nbanks} 个字库 bank（CHR {NEWBANK}..{NEWBANK + enc.nbanks - 1}，可用 128），"
+          f"超容需拆页的句：{enc.oversized}")
+    done = enc.encode_all()
+    bad = [n for n in done if enc.decode_sentence(n) != tr[n]]
+    print(f"回写 {len(done)} 句；共享 block {len(enc.blk_of)}；"
+          f"PPU 串 {enc.tp - enc.TEXT_FREE[0]}B，块串 {enc.bp - enc.BLK_FREE[0]}B")
+    print(f"round-trip: {len(done) - len(bad)}/{len(done)} 一致" + (" ✓" if not bad else f"，首坏 {bad[0]}"))
     if bad:
-        n = bad[0]
-        print("  原:", _norm(R0.sentence_text(n, codes=True))[:80])
-        print("  新:", _norm(enc.decode_sentence(n))[:80])
+        n = bad[0]; print("  原:", tr[n][:80]); print("  新:", enc.decode_sentence(n)[:80])
+    else:
+        open("MSG-zh-full.nes", "wb").write(enc.rom)
+        print(f"✓ 写出 MSG-zh-full.nes ({len(enc.rom)} bytes)；注：多 bank 切换 asm 钩子尚未加，"
+              f"当前所有句仍读默认 bank {NEWBANK}，仅 bank0 那批句子显示正常")
