@@ -3,6 +3,8 @@
 
 # 从 ROM 提取的日文原剧本 & 译文 WIP（版权/衍生，切勿提交；工具可自行导出）
 scratch_script.json
+script_ja.txt
+blocks_ja.txt
 translation/batches/
 translation/out/
 translation/script_zh.tsv
