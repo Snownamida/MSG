@@ -1,6 +1,13 @@
 # 游戏 ROM —— 请自备，切勿提交（版权）
 *.nes
 
+# 从 ROM 提取的日文原剧本 & 译文 WIP（版权/衍生，切勿提交；工具可自行导出）
+scratch_script.json
+translation/batches/
+translation/out/
+preview/
+patch_poc.py
+
 # Python
 __pycache__/
 
