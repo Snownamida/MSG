@@ -125,11 +125,22 @@ def emit_char(bs, ch):
     blk = block_for(code)
     bs += bytes([blk]) if blk < 0x80 else bytes([blk >> 8, blk & 0xFF])
 
+# 前导设置块：原版块串开头那些渲染空的低位设置块（区域/对话框初始化，如 03 / 06 04 01），
+# 从拍平译文里看不见，必须从原版搬回。停在第一个控制码/名字块/文字/引号/折行。
+SETUP_STOP = {0x00, 0x02, 0x08, 0x09, 0x0D, 0x0E} | DOUBLE_BYTE | TRIPLE_BYTE
+
+def leading_setup(n):
+    raw = R0.sentence_blocks(n); out = bytearray()
+    for b in raw:
+        if b in SETUP_STOP or b >= 0x1A or b in NAME_IDS: break
+        out.append(b)
+    return out
+
 done = 0
 for n in OPENING:
     if not tr.get(n): continue
-    text = tr[n]
-    bs = bytearray()
+    text = tr[n].lstrip("　 ")                 # 去行首多余空格（名字块自带定位）
+    bs = bytearray(leading_setup(n))          # 保留原版前导设置块
     i = 0
     while i < len(text):
         # 控制码
