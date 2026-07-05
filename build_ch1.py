@@ -112,8 +112,11 @@ for bid in NAME_IDS:
     sp, _ = R0.string_pointer(R0.read3(R0.text_pointer(bid)))
     rom[sp:sp + X + 2] = bytes([0x00, X] + [0xFE] * lead + codes + [0xFE] * pad + [0x11])
 
-# char block 池（避开名字块/控制/折行/引号 ID）
-RESERVED = NAME_IDS | {0x00, 0x02, 0x08, 0x09} | set(range(0x01, 0x20))
+# char block 池（避开名字块/控制/折行/引号/一切结构块 ID）
+# 结构块 = PPU 串以 00 开头（名字 [00,X,...,11]、空隙 [00,N,FE*]、设置 [00,00]）——
+# 引擎读其 header 决定演出（空隙块驱动绿字行属性=调色板3），改内容会毁演出。
+STRUCT_IDS = {b for b in range(0x20, 0x80) if (p := R0.block_ppu(b)) and p[0] == 0}
+RESERVED = NAME_IDS | STRUCT_IDS | {0x00, 0x02, 0x08, 0x09} | set(range(0x01, 0x20))
 free_blocks = iter([b for b in range(0x20, 0x80) if b not in RESERVED] + list(range(0x8080, 0x8B54)))
 p = SAFE[0]; blk_of = {}
 def block_for(code):
@@ -129,10 +132,39 @@ def emit_code(bs, code):
     blk = block_for(code)
     bs += bytes([blk]) if blk < 0x80 else bytes([blk >> 8, blk & 0xFF])
 
+
+def orig_leading_gap(n):
+    """原句开头的空隙块 [00,N,FE*]。空隙块 ID 携带演出语义（如绿字行属性/调色板，
+    同内容异 ID 的空隙块有一堆），必须原样复用，不能用普通字模空格顶替。"""
+    s = R0.sentence_blocks(n); i = 0
+    while i < len(s):
+        b = s[i]
+        if b in TRIPLE_BYTE: i += 3; continue
+        if b in DOUBLE_BYTE: i += 2; continue
+        if b == 0x00: break
+        blk = b if b < 0x80 else (b << 8) | s[i + 1]
+        i += 1 if b < 0x80 else 2
+        p = R0.block_ppu(blk)
+        if p == b"\x00\x00": continue                     # 设置块/折行锚，跳过
+        if len(p) >= 3 and p[0] == 0 and all(x == 0xFE for x in p[2:]):
+            return blk, p[1]                              # (块ID, 空格数N)
+        return None
+    return None
+
 done = 0
 for n in sorted(include):
     text = tr[n]; bs = bytearray(); i = 0
+    gap = orig_leading_gap(n); gap_pending = True
     while i < len(text):
+        # 行首空格串 → 复用原句空隙块（块 ID 决定该区属性/调色板）
+        if gap_pending and text[i] in (" ", "　"):
+            j = i
+            while j < len(text) and text[j] in (" ", "　"): j += 1
+            if gap and gap[1] == j - i:
+                bs.append(gap[0]); i = j; gap_pending = False; continue
+            gap_pending = False
+        elif text[i] not in "{~/" and not SPK_RE.match(text, i):
+            gap_pending = False
         m = CTRL_RE.match(text, i)
         if m: bs += bytes.fromhex(m.group(1)); i = m.end(); continue
         m = SETUP_RE.match(text, i)
@@ -153,10 +185,9 @@ for n in sorted(include):
     rom[R0.sentence_pointer(n):R0.sentence_pointer(n) + 3] = s3
     done += 1
 
-# 绿字区经光栅分屏用 bank 103（实机扫描线24实测 CHR=$67550=bank103）——把中文字库也拷进去。
-# 同时拷 bank 0（保险）。这些原 CHR bank 被覆盖只影响其他幕（demo 里本就乱码），不碰当前 CG。
-for b in (0, 103):
-    rom[CHR0 + b * 4096: CHR0 + b * 4096 + 4096] = rom[dst:dst + 4096]
+# 绿字区（顶部 overlay）经光栅分屏读 bank 0（无头取证：$512B 每帧 103/128/0 三段），
+# 把中文字库拷进 bank 0。bank 103 是该幕 CG 美术，绝不能动（上次覆盖导致 CG 全花）。
+rom[CHR0:CHR0 + 4096] = rom[dst:dst + 4096]
 
 open(OUT, "wb").write(rom)
 a = open(SRC, "rb").read()

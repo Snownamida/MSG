@@ -288,6 +288,30 @@ PoC 脚本：`patch_poc.py`（实验性，依赖本地 ROM，产物 `MSG-zh-test
   更通用（一句可跨 bank），但需 RE 控制码派发 + 与光栅分屏/NMI 的 bank 协作。
 - 备选 C：MMC5 ExRAM 逐 tile bank（属性扩展模式）——理论可近乎无限字，但要启用大特性，风险最高。
 
+### 里程碑 8：绿字之谜破解 + 无头模拟器取证闭环 — 2026-07-05
+
+开场顶部绿字（句 63「寻找创造主 地球正濒临危机」）只显示 5/12 字，排查三层后全修：
+
+1. **绿字区 CHR bank**：该幕 `$512B` 每帧光栅三段——CG=bank103、对话=bank128（B 命门补丁）、
+   **绿字=bank0**（vblank 尾写 0，覆盖 scanline 0-24）。→ 中文字库拷进 bank 0 即可；
+   **bank 103 是该幕 CG 美术，千万别动**（全部 128 个原 bank 画成图集看过：成套字库只有
+   bank0=对话字库、bank10=标题字体，其余全是 CG——`reversing/chr_atlas.py`）。
+2. **假线索排除**：nametable 码全对（绿字写在 NT $2000 **行 25**，靠 scroll 卷到屏顶）；
+   字库 tile 全在位；缺字与 tile 码区间无关——但与 **16×16 属性对完美相关**（偶对隐形/奇对显示）。
+3. **根因 = 空隙块结构语义**：绿字行属性原版全 `$FF`（调色板3=绿），我们的构建是 `$FE`
+   （TL 象限=调色板2=全黑 → 偶数 16px 列隐形）。差异来源：句 63 行首的**空隙块 `0x4B`
+   （PPU=[00,03,FE,FE,FE]）**——引擎读它写属性 `$FF`。同内容异 ID 的空隙块有一堆
+   （3D/48/4B/4C/59 全是 [00,03,FE³]），**块 ID 本身携带演出语义**，与名字块同理。
+   而 build 曾把 0x4B 当空闲块挪用给字模 → header 消失 → 属性 fallback `$FE`。
+   **修复**：一切结构块（PPU 串以 00 开头：名字/空隙/设置）保留不进分配池；
+   行首空格串回写为原句的空隙块 ID（`orig_leading_gap`）。
+
+**无头取证闭环（新方法论，勿再手动来回截图）**：`mesen_headless_green.lua` +
+`Mesen --testrunner <rom> <lua>`。要点：`print()` 直通 stdout（`emu.log` 在 testrunner 不可见）、
+Lua 沙箱禁 `io`（输出/截图全走 print，截图 hex 编码）、`emu.setEmulationSpeed(0)` 不限速
+（整轮 7 秒）、开场动画在 NEW GAME **之前**自动播放（什么都不按等它来）、
+检测 NT 连续码序列防 CG 撞码假阳性。dump：MMC5 全寄存器+ExRAM+双 NT 30 行+属性表+调色板+截图。
+
 ## 翻译
 
 `translation/GLOSSARY.md`（人名/专名/控制码保留规则，随仓库）。日文原剧本与译文 WIP 按版权 gitignore
