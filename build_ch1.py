@@ -153,8 +153,10 @@ for n in sorted(include):
     rom[R0.sentence_pointer(n):R0.sentence_pointer(n) + 3] = s3
     done += 1
 
-# 绿字区域用 bank 0（原字体库）渲染——把中文字库也拷进 bank 0，让绿字也显示中文（实验）
-rom[CHR0:CHR0 + 4096] = rom[dst:dst + 4096]
+# 绿字区经光栅分屏用 bank 103（实机扫描线24实测 CHR=$67550=bank103）——把中文字库也拷进去。
+# 同时拷 bank 0（保险）。这些原 CHR bank 被覆盖只影响其他幕（demo 里本就乱码），不碰当前 CG。
+for b in (0, 103):
+    rom[CHR0 + b * 4096: CHR0 + b * 4096 + 4096] = rom[dst:dst + 4096]
 
 open(OUT, "wb").write(rom)
 a = open(SRC, "rb").read()
