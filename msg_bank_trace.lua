@@ -1,24 +1,28 @@
--- 绿字区域 bank 追踪：记录每帧 $512B(BG CHR bank) 的写入 + 发生的扫描线，
--- 看清屏幕被分成几个横向区域、各用哪个 CHR bank（绿字在顶部，对话框在底部=128）。
+-- BG 4 个 1KB slot 追踪：MMC5 的 BG 图案按 tile 号分 4 段用不同 bank：
+--   tile 0x00-0x3F→$5128, 0x40-0x7F→$5129, 0x80-0xBF→$512A, 0xC0-0xFF→$512B
+-- 记录这 4 个寄存器每次写入的值 + 扫描线，看绿字区/对话框区各段用哪个 bank。
 --
--- 用【MSG-zh-demo.nes】跑：玩到"通电"那屏（顶部有绿字乱码、中间男孩 CG、底部对话框），
--- 停一两秒让它稳定，然后把 Log 复制给我。我要看：绿字扫描线(约 16-40)激活的 bank 是多少、
--- 和中间 CG、底部对话框(128) 是不是不同的区。
+-- 用 MSG-zh-demo.nes：玩到"通电"绿字屏，停住不动，把 Log 复制给我。
 
+local names = {[0x5128]="$5128(tile 00-3F)", [0x5129]="$5129(tile 40-7F)",
+               [0x512A]="$512A(tile 80-BF)", [0x512B]="$512B(tile C0-FF)"}
 local seen = {}
-local frame = 0
+local frames = 0
 
-emu.addMemoryCallback(function(addr, value)
-  if frame > 3 then return end                 -- 只抓开头几帧，避免刷屏
-  local sl = -1
+local function cb(addr, value)
+  if frames > 4 then return end
+  local sl = -99
   local ok, st = pcall(emu.getState)
   if ok and st and st.ppu then sl = st.ppu.scanline end
-  local key = string.format("sl%d=%d", sl, value)
+  local key = string.format("%x@%d=%d", addr, sl, value)
   if not seen[key] then
     seen[key] = true
-    emu.log(string.format("帧%d 扫描线%3d: $512B <- bank %d", frame, sl, value))
+    emu.log(string.format("扫描线%4d: %s <- bank %d", sl, names[addr] or string.format("$%04X", addr), value))
   end
-end, emu.callbackType.write, 0x512B)
+end
 
-emu.addEventCallback(function() frame = frame + 1 end, emu.eventType.startFrame)
-emu.log("== bank 追踪就绪：玩到通电绿字屏，稳定后复制 Log ==")
+for _, r in ipairs({0x5128, 0x5129, 0x512A, 0x512B}) do
+  emu.addMemoryCallback(cb, emu.callbackType.write, r, r)
+end
+emu.addEventCallback(function() frames = frames + 1 end, emu.eventType.startFrame)
+emu.log("== BG 4-slot 追踪就绪：玩到通电绿字屏，停住，复制 Log ==")
