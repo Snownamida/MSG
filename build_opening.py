@@ -78,7 +78,10 @@ def block_for(code):
         blk_of[code] = blk
     return blk_of[code]
 
-# 回写开场句块串（控制码字节 + 字形 block 序列）
+# 折行锚：在中文标点后插入空块 0x02（原版折行/分页机制；0x02 未被借用，其 PPU=[00,00] 完好）
+FOLD_AFTER = set("。！？，、」…")
+
+# 回写开场句块串（控制码字节 + 字形 block 序列 + 标点后折行锚）
 done = 0
 for n in OPENING:
     if not tr.get(n): continue
@@ -90,6 +93,8 @@ for n in OPENING:
             code = v if kind == "icon" else char2code[v]
             blk = block_for(code)
             bs += bytes([blk]) if blk < 0x80 else bytes([blk >> 8, blk & 0xFF])
+            if kind == "ch" and v in FOLD_AFTER:
+                bs.append(0x02)          # 折行锚
     bs.append(0x00)
     assert p + len(bs) <= SAFE[1], f"安全区溢出 @句{n}"
     addr = p; rom[addr:addr + len(bs)] = bs; p += len(bs)
@@ -119,7 +124,11 @@ for n in OPENING:
         elif b == 0x00: break
         else:
             blk = b if b < 0x80 else (b << 8) + raw[i+1]; i += 1 if b < 0x80 else 2
-            for c in P.block_ppu(blk):
-                out.append(inv.get(c) or icon_inv.get(c) or f"?{c:02X}?")
+            ppu = P.block_ppu(blk); j = 0
+            while j < len(ppu):
+                c = ppu[j]
+                if c == 0x00: j += 2; continue          # gap：跳过下一字节（含折行块 0x02）
+                if c in (0x0E, 0x0F): j += 2; continue   # 浊点前缀（此处译文无）
+                out.append(inv.get(c) or icon_inv.get(c) or f"?{c:02X}?"); j += 1
     if "".join(out) != tr[n]: bad += 1
 print(f"round-trip: {done - bad}/{done} 一致" + (" ✓" if not bad else " ✗"))
