@@ -310,7 +310,22 @@ PoC 脚本：`patch_poc.py`（实验性，依赖本地 ROM，产物 `MSG-zh-test
 `Mesen --testrunner <rom> <lua>`。要点：`print()` 直通 stdout（`emu.log` 在 testrunner 不可见）、
 Lua 沙箱禁 `io`（输出/截图全走 print，截图 hex 编码）、`emu.setEmulationSpeed(0)` 不限速
 （整轮 7 秒）、开场动画在 NEW GAME **之前**自动播放（什么都不按等它来）、
-检测 NT 连续码序列防 CG 撞码假阳性。dump：MMC5 全寄存器+ExRAM+双 NT 30 行+属性表+调色板+截图。
+检测 NT 连续码序列防 CG 撞码假阳性、**setInput 必须在 inputPolled 回调里**（startFrame 里无效）、
+**exec 回调必须传 start,end 两个地址**（`addMemoryCallback(fn,exec,a,a)`）。
+dump：MMC5 全寄存器+ExRAM+双 NT 30 行+属性表+调色板+截图。
+
+### 里程碑 9：句号 trace 打通（移植自 2021 FCEUX 脚本）— 2026-07-06
+
+用户 2021 年的 `自动化.lua`（FCEUX，未写完/跑不到通关）里藏着句号读取钩子，移植到 Mesen
+成立（`mesen_sentence_trace.lua`）：
+- **钩子点 $F071**（exec）：游戏读句子指针时经过；zero-page **$87/$88** = 当前句子指针。
+- **反算**：`$87 ∈ [$BCB5,$BFFF) 且 $A000 首字节==PRG[0]($00,bank0)` → 句号 `($87-$BCB5)/3`（主表 1~281 区）；
+  `$87 ∈ [$A000,$BD4B) 且 $A000 首字节==PRG[$2000]($36,bank1)` → 句号 `($87-$A000)/3+281`（追加表）。
+  （bank0 首字节 $00、bank1 首字节 $36 是 rom.readbyte 判据，实测吻合。）
+- **$0450 = 当前背景 CG bank**（非字库 bank）；据此可按场景（`sentence_for_back`）归类句集。
+- **实测测绘**：开场=句 61(bank30)→62-65(bank67，含绿字)→回标题；**NEW GAME 正片自句 90 起**
+  (bank10 店门口→bank0B 海边)。**推翻"第一章=句55-110"的猜测**——55-89 多为其它场景/菜单。
+  完整第一章句集待更聪明的导航（随机按键会卡在海边菜单循环 94/97/102/105/106）。
 
 ## 翻译
 
