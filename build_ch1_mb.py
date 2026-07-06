@@ -115,7 +115,7 @@ rom[NMI2:NMI2 + 6] = bytes([0x09, 0x80, 0x8D, 0x5F, 0x04, 0xEA])   # ORA #$80; S
 # 海边区{0B,10,11}(海边/店门口/店铺反复切)；其余场景各自单组。名字字用全局固定码(名字块跨组
 # 共享 block，码必须处处一致)。**只回写主线 59-172**：回访句(173+)与主线同 $0450 会挤进同 bank
 # 累计超 213，暂留日文(需 asm 加维度区分同场景多访问才能上，见 REVERSING)。
-SCENE_GROUPS = [{0x0A, 0x30, 0x67}, {0x0B, 0x10, 0x11}]
+SCENE_GROUPS = [{0x0A, 0x30, 0x67}]   # 仅开场CG互切组共享;其余(含海边0B/店门口10/店铺11)各自独立
 def group_of(sc):
     for g in SCENE_GROUPS:
         if sc in g: return frozenset(g)
@@ -126,12 +126,30 @@ for l in open("reversing/ch1_scene_map.tsv"):
     if l.startswith("SEQ"):
         _, n, b = l.split(); gui_scene.setdefault(int(n), int(b, 16))
 
+# 跨场景句(在多个 $0450 下显示,字须全局固定码才能各 bank 同码位):accurate 每帧采样标记的多场景句
+# + 手动补 accurate 因 lastN 滞后漏采的边界句(海边↔店门口↔店铺间反复切,用户实测句91等跨)
+cross_sents = set()
+try:
+    for l in open("preview/accurate.log"):
+        if l.startswith("MAP"):
+            _, n, bs = l.strip().split("\t")
+            if len(bs.split(",")) > 1: cross_sents.add(int(n))
+except FileNotFoundError:
+    pass
+cross_sents |= {90, 91, 92, 94, 97, 110, 113}
+
 name_chars = set()
 for cn in JP2CN.values(): name_chars |= set(cn)
 name_chars -= set(PUNCT_REUSE)
-name_code = {ch: CODE_POOL[i] for i, ch in enumerate(sorted(name_chars))}
-rest_pool = [c for c in CODE_POOL if c not in set(name_code.values())]
-CAP = len(rest_pool)   # 每组独有字预算(码池去名字)
+cross_chars = set()
+for n in cross_sents:
+    if n in tr: cross_chars |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
+fixed_chars = name_chars | cross_chars
+fixed_code = dict(PUNCT_REUSE)
+for code, ch in zip(CODE_POOL, sorted(fixed_chars)): fixed_code[ch] = code
+name_code = fixed_code   # 名字块用(名字字在 fixed 里)
+rest_pool = [c for c in CODE_POOL if c not in set(fixed_code.values())]
+CAP = len(rest_pool)   # 每场景独有字预算(码池去固定码)
 
 # 组含回访(173-216)后仍 ≤ 预算则回写全部(主线+回访)；超则只回写主线(59-172)，回访留日文
 # (热点场景 0B海边/0E工作间/14穿梭机 主线+回访累计超 213，需 asm 加维度分第二 bank，见 REVERSING)
@@ -141,21 +159,33 @@ for n in sorted(tr):
 include = []
 group_chars = defaultdict(set)
 for g, sents in group_sents.items():
-    full = set()
-    for n in sents: full |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
-    keep = sents if len(full) <= CAP else [n for n in sents if n <= 156]   # 第一章主线到156(离开地球);157-170=STAFF英文,171+=第二章
+    full = set(); used_n = set()
+    for n in sents:
+        full |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
+        used_n |= (visible_chars(tr[n]) & name_chars)
+    avail_g = len(rest_pool) + (len(name_chars) - len(used_n))   # 名字优化后该组独有字预算
+    keep = sents if len(full) <= avail_g else [n for n in sents if n <= 156]   # 装得下则含回访;否则只主线(157+=STAFF/第二章)
     for n in keep:
         include.append(n)
-        group_chars[g] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
+        group_chars[g] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
 include.sort()
 skipped = [n for n in tr if n not in include]
 
 scene_c2c = {}
 for g, chars in group_chars.items():
+    # 名字优化:该组只装用到的名字,未用名字的固定码位释放给独有字(名字块仍用全局码,该组不显示的名字不占字模)
+    used_names = set()
+    for n in include:
+        if group_of(gui_scene[n]) == g:
+            used_names |= (visible_chars(tr[n]) & name_chars)
+    unused_name_codes = [name_code[nm] for nm in name_chars if nm not in used_names]
+    avail = rest_pool + unused_name_codes
     srt = sorted(chars)
-    assert len(name_code) + len(srt) <= len(CODE_POOL), f"组{[f'${s:02X}' for s in sorted(g)]}: {len(name_code)+len(srt)} > {len(CODE_POOL)}"
-    c2c = dict(PUNCT_REUSE); c2c.update(name_code)
-    for code, ch in zip(rest_pool, srt): c2c[ch] = code
+    assert len(srt) <= len(avail), f"组{[f'${s:02X}' for s in sorted(g)]}: 独有{len(srt)} > 可用{len(avail)}"
+    c2c = dict(PUNCT_REUSE)
+    for ch in cross_chars: c2c[ch] = fixed_code[ch]        # 跨场景字:全局固定码
+    for nm in used_names: c2c[nm] = name_code[nm]          # 用到的名字:全局固定码
+    for code, ch in zip(avail, srt): c2c[ch] = code        # 独有字:剩余码 + 未用名字码位
     for sc in g:
         fb = sc | 0x80
         rom[CHR0 + fb * 4096: CHR0 + fb * 4096 + 4096] = rom[CHR0:CHR0 + 4096]   # bank0 拷贝
@@ -163,7 +193,7 @@ for g, chars in group_chars.items():
             if ch in PUNCT_REUSE: continue
             rom[CHR0 + fb * 4096 + code * 16: CHR0 + fb * 4096 + code * 16 + 16] = glyph8x8(ch)
         scene_c2c[sc] = c2c
-    print(f"组 {[f'${s:02X}' for s in sorted(g)]}: {len(srt)}字+{len(name_code)}名字")
+    print(f"组 {[f'${s:02X}' for s in sorted(g)]}: 独有{len(srt)} 用到名字{len(used_names)} 可用{len(avail)}")
 
 # 绿字(句63, 场景 $67)是顶部 overlay，光栅分屏读 bank 0——把该场景字模也拷进 bank 0
 if 0x67 in scene_c2c:
