@@ -366,7 +366,26 @@ dump：MMC5 全寄存器+ExRAM+双 NT 30 行+属性表+调色板+截图。
 ## 翻译
 
 `translation/GLOSSARY.md`（人名/专名/控制码保留规则，随仓库）。日文原剧本与译文 WIP 按版权 gitignore
-（`scratch_script.json`、`translation/batches|out/`）。2781 句切 14 批（200/批），由并行子代理译。
+（`scratch_script.json`、`translation/batches|out/`、`translation/struct_full.tsv`）。
+
+### 里程碑 11：全量结构化译文集齐（2781/2781，token 0 不一致）— 2026-07-06
+
+在 flat 中文草稿(2781 句)基础上做**结构化重译**——按日文原文结构(`structio.export_structured`)把折行
+`/`、设置块 `{sHH}`、空隙块 `{gHH}`、控制码 `~XXXX~`、名字块、引号补回中文。分 12 批(1-54 + 157-2781
+按 250/批 + 第一章 55-156)由并行子代理做,每批产出后用 `structio` 的 `_structural_sig`/`_sig_from_structured`
+**独立逐句比对日文结构验证**(不只信 agent 自查):
+- **2781/2781 句全部结构化**,合并进 `translation/struct_full.tsv`(gitignore)。
+- **token 一致性 0 处不一致**(每句 `~XXXX~`/`{sHH}`/`{gHH}` 的数量/顺序/十六进制 + `/` 折行数量
+  均与日文严格相等)。
+- 发现:flat 草稿其实保留了多数 `~XXXX~` 控制码,普遍丢失的是 `{sHH}` 设置块和全部 `/` 折行——
+  结构化的核心工作即按日文位置把这两类补回,吸附到中文短语边界。
+- 待打磨(非硬约束):部分长句因中日语序差异,`/` 落点是短语近似(数量精确);省略号 `……`/`......`
+  各批不统一,回写时 build 里 normalize。
+- **通往全量可玩仅剩「场景映射」**(每句归属哪个 `$0450` 用于装箱,里程碑 10 的 asm 运行时自动切 bank
+  已就绪)——最实际靠 GUI trace 玩一遍(testrunner 30000 帧限只在无头,GUI 无),或续攻 savestate 分段+修
+  `stage_1` 海边 op10 序列。
+
+（历史）早期 flat 翻译:2781 句切 14 批(200/批),由并行子代理译。
 
 ## 工具
 
