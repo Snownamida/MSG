@@ -18,7 +18,7 @@ SRC = "Metal Slader Glory (Japan).nes"; OUT = "MSG-zh-demo.nes"
 CHR0 = 0x10 + 512 * 1024
 NMI2 = 0x7EB8F                      # NMI region-1 字库bank：LDA$0451;STA$045F → ORA#$80;STA$045F;NOP
 SAFE = (0x73604, 0x76000)
-STRUCT_ZH = "translation/ch1/structured_zh.tsv"
+STRUCT_ZH = "translation/struct_full.tsv"   # 全量结构化译文(含回访 173-216)
 TRACE_LOGS = ("reversing/ch1_scene_map.tsv", "preview/playthrough.log", "preview/playthrough_orig.log")
 
 SPEAKER_BLOCK = {"忠": 0x20, "艾莉娜": 0x21, "梓": 0x22, "查米": 0x23, "阿源": 0x24,
@@ -126,19 +126,29 @@ for l in open("reversing/ch1_scene_map.tsv"):
     if l.startswith("SEQ"):
         _, n, b = l.split(); gui_scene.setdefault(int(n), int(b, 16))
 
-include = [n for n in sorted(tr) if n in gui_scene and n <= 172]
-skipped = [n for n in tr if n not in include]
-
 name_chars = set()
 for cn in JP2CN.values(): name_chars |= set(cn)
 name_chars -= set(PUNCT_REUSE)
 name_code = {ch: CODE_POOL[i] for i, ch in enumerate(sorted(name_chars))}
 rest_pool = [c for c in CODE_POOL if c not in set(name_code.values())]
+CAP = len(rest_pool)   # 每组独有字预算(码池去名字)
 
-# 每组字集(组内主线句的字) → 组内每个场景 bank 都写该组字模，码位一致
+# 组含回访(173-216)后仍 ≤ 预算则回写全部(主线+回访)；超则只回写主线(59-172)，回访留日文
+# (热点场景 0B海边/0E工作间/14穿梭机 主线+回访累计超 213，需 asm 加维度分第二 bank，见 REVERSING)
+group_sents = defaultdict(list)
+for n in sorted(tr):
+    if n in gui_scene and n <= 216: group_sents[group_of(gui_scene[n])].append(n)
+include = []
 group_chars = defaultdict(set)
-for n in include:
-    group_chars[group_of(gui_scene[n])] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
+for g, sents in group_sents.items():
+    full = set()
+    for n in sents: full |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
+    keep = sents if len(full) <= CAP else [n for n in sents if n <= 156]   # 第一章主线到156(离开地球);157-170=STAFF英文,171+=第二章
+    for n in keep:
+        include.append(n)
+        group_chars[g] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
+include.sort()
+skipped = [n for n in tr if n not in include]
 
 scene_c2c = {}
 for g, chars in group_chars.items():
