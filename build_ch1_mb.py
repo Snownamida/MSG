@@ -68,16 +68,26 @@ def load_struct(path):
     return tr
 
 
-def load_scene_map():
-    sm = {}
+def load_scenes():
+    """句 → 它显示期间出现过的所有 $0450 场景(集合)。preview/accurate.log(每帧采样，准确记录
+    跨 CG 句的多场景)优先；其余句用 ch1_scene_map/playthrough 的首次 $0450(单场景)补。"""
+    scenes = {}
+    try:
+        for l in open("preview/accurate.log"):
+            if l.startswith("MAP"):
+                _, n, bs = l.strip().split("\t")
+                scenes[int(n)] = set(int(b, 16) for b in bs.split(","))
+    except FileNotFoundError:
+        pass
     for fn in TRACE_LOGS:
         try:
             for l in open(fn):
                 if l.startswith("SEQ"):
-                    _, n, b = l.split(); sm.setdefault(int(n), int(b, 16))
+                    _, n, b = l.split(); n = int(n)
+                    if n not in scenes: scenes[n] = {int(b, 16)}
         except FileNotFoundError:
             pass
-    return sm
+    return scenes
 
 
 def visible_chars(s):
@@ -87,7 +97,7 @@ def visible_chars(s):
 
 
 tr = load_struct(STRUCT_ZH)
-scene_map = load_scene_map()
+scene_map = load_scenes()
 rom = bytearray(open(SRC, "rb").read())
 R0 = Rom(bytes(rom))
 NAME_IDS = {b for b in iter_blocks()
@@ -100,48 +110,50 @@ rom[5] = 128; rom += bytes(512 * 1024)
 assert rom[NMI2:NMI2 + 6] == bytes([0xAD, 0x51, 0x04, 0x8D, 0x5F, 0x04]), rom[NMI2:NMI2 + 6].hex()
 rom[NMI2:NMI2 + 6] = bytes([0x09, 0x80, 0x8D, 0x5F, 0x04, 0xEA])   # ORA #$80; STA $045F; NOP
 
-# 只回写「已知场景」的第一章句子；未测绘的留日文
-include = [n for n in sorted(tr) if n in scene_map]
-skipped = [n for n in tr if n not in scene_map]
+# 场景分组装箱：CG 切换/紧密相邻的场景合并成组，组内所有 bank 共享同一字集+码位——跨 CG 或跨
+# 场景显示的句在组内任何 bank 都有字、码位一致。开场组{0A,30,67}(机甲/通电/异变CG互切)、
+# 海边区{0B,10,11}(海边/店门口/店铺反复切)；其余场景各自单组。名字字用全局固定码(名字块跨组
+# 共享 block，码必须处处一致)。**只回写主线 59-172**：回访句(173+)与主线同 $0450 会挤进同 bank
+# 累计超 213，暂留日文(需 asm 加维度区分同场景多访问才能上，见 REVERSING)。
+SCENE_GROUPS = [{0x0A, 0x30, 0x67}, {0x0B, 0x10, 0x11}]
+def group_of(sc):
+    for g in SCENE_GROUPS:
+        if sc in g: return frozenset(g)
+    return frozenset({sc})
 
-# 名字字固定码位（所有场景 bank 一致；名字块共享 block）
+gui_scene = {}   # 首次 $0450(单值,全覆盖)用于分组
+for l in open("reversing/ch1_scene_map.tsv"):
+    if l.startswith("SEQ"):
+        _, n, b = l.split(); gui_scene.setdefault(int(n), int(b, 16))
+
+include = [n for n in sorted(tr) if n in gui_scene and n <= 172]
+skipped = [n for n in tr if n not in include]
+
 name_chars = set()
 for cn in JP2CN.values(): name_chars |= set(cn)
 name_chars -= set(PUNCT_REUSE)
 name_code = {ch: CODE_POOL[i] for i, ch in enumerate(sorted(name_chars))}
 rest_pool = [c for c in CODE_POOL if c not in set(name_code.values())]
 
-# 各场景字集 → 每场景独立 c2c + 字模写进 (cg|0x80) bank
-scene_chars = defaultdict(set)
+# 每组字集(组内主线句的字) → 组内每个场景 bank 都写该组字模，码位一致
+group_chars = defaultdict(set)
 for n in include:
-    scene_chars[scene_map[n]] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
-
-# 开场序幕(句 59-66)的对话跨 CG 场景显示(机甲 CG $30 与通电 CG $67 之间切换)，同一句可能
-# 在任一 CG 下出现。让这些场景**共享同一字集**——字集相同 → sorted 码位分配相同 → 块串里的字模码
-# 在这几个 bank 都指向同一字，不管在哪个 CG 显示都不会乱。(trace 按读指针时刻记 $0450，对跨 CG
-# 的开场句会记错场景；此合并绕过该问题。)
-opening_sents = [n for n in include if 59 <= n <= 66]
-if opening_sents:
-    opening_scenes = {scene_map[n] for n in opening_sents}
-    opening_chars = set()
-    for n in opening_sents:
-        opening_chars |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
-    for sc in opening_scenes:
-        scene_chars[sc] = set(opening_chars)
+    group_chars[group_of(gui_scene[n])] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
 
 scene_c2c = {}
-for sc, chars in sorted(scene_chars.items()):
-    fb = sc | 0x80
-    rom[CHR0 + fb * 4096: CHR0 + fb * 4096 + 4096] = rom[CHR0:CHR0 + 4096]   # bank0 拷贝(边框/引号/图标/空白)
+for g, chars in group_chars.items():
     srt = sorted(chars)
-    assert len(name_code) + len(srt) <= len(CODE_POOL), f"场景${sc:02X}: {len(name_code)+len(srt)}字 > {len(CODE_POOL)}"
+    assert len(name_code) + len(srt) <= len(CODE_POOL), f"组{[f'${s:02X}' for s in sorted(g)]}: {len(name_code)+len(srt)} > {len(CODE_POOL)}"
     c2c = dict(PUNCT_REUSE); c2c.update(name_code)
     for code, ch in zip(rest_pool, srt): c2c[ch] = code
-    for ch, code in c2c.items():
-        if ch in PUNCT_REUSE: continue
-        rom[CHR0 + fb * 4096 + code * 16: CHR0 + fb * 4096 + code * 16 + 16] = glyph8x8(ch)
-    scene_c2c[sc] = c2c
-    print(f"场景 ${sc:02X}→字库bank ${fb:02X}: {len(srt)}场景字+{len(name_code)}名字字")
+    for sc in g:
+        fb = sc | 0x80
+        rom[CHR0 + fb * 4096: CHR0 + fb * 4096 + 4096] = rom[CHR0:CHR0 + 4096]   # bank0 拷贝
+        for ch, code in c2c.items():
+            if ch in PUNCT_REUSE: continue
+            rom[CHR0 + fb * 4096 + code * 16: CHR0 + fb * 4096 + code * 16 + 16] = glyph8x8(ch)
+        scene_c2c[sc] = c2c
+    print(f"组 {[f'${s:02X}' for s in sorted(g)]}: {len(srt)}字+{len(name_code)}名字")
 
 # 绿字(句63, 场景 $67)是顶部 overlay，光栅分屏读 bank 0——把该场景字模也拷进 bank 0
 if 0x67 in scene_c2c:
@@ -202,7 +214,7 @@ def orig_leading_gap(n):
 
 done = 0
 for n in include:
-    text = tr[n]; c2c = scene_c2c[scene_map[n]]; bs = bytearray(); i = 0
+    text = tr[n]; c2c = scene_c2c[gui_scene[n]]; bs = bytearray(); i = 0
     gap = orig_leading_gap(n); gap_pending = True
     while i < len(text):
         if gap_pending and text[i] in (" ", "　"):
