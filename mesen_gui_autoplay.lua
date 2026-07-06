@@ -139,8 +139,10 @@ emu.addEventCallback(function()
     if coroutine.status(co) ~= "dead" then
       local ok, err = coroutine.resume(co)
       if not ok then emu.log("协程错误: " .. tostring(err)) end
+      if stall >= 3 then manual = true; stall = 0; emu.log("== 卡住，切 MANUAL：请手动接管 ==") end
+    else
+      manual = true; emu.log("== stage_1 序列跑完，切 MANUAL：控制权已交还，继续手动玩到章末 ==")
     end
-    if stall >= 3 then manual = true; stall = 0; emu.log("== 卡住，切 MANUAL：请手动推剧情 ==") end
   else
     -- 手动模式下若剧情在推进(有新句)，保持手动；若你已推过一段(句数涨了不少)可继续手动到章末
     if count > lastCount then idleFrames = 0 else idleFrames = idleFrames + 1 end

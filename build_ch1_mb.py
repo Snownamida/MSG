@@ -19,7 +19,7 @@ CHR0 = 0x10 + 512 * 1024
 NMI2 = 0x7EB8F                      # NMI region-1 字库bank：LDA$0451;STA$045F → ORA#$80;STA$045F;NOP
 SAFE = (0x73604, 0x76000)
 STRUCT_ZH = "translation/ch1/structured_zh.tsv"
-TRACE_LOGS = ("preview/playthrough.log", "preview/playthrough_orig.log")
+TRACE_LOGS = ("reversing/ch1_scene_map.tsv", "preview/playthrough.log", "preview/playthrough_orig.log")
 
 SPEAKER_BLOCK = {"忠": 0x20, "艾莉娜": 0x21, "梓": 0x22, "查米": 0x23, "阿源": 0x24,
                  "希尔琪奴": 0x25, "凯蒂": 0x26, "恩凯": 0x27, "弥生": 0x28,
