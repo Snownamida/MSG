@@ -116,6 +116,19 @@ scene_chars = defaultdict(set)
 for n in include:
     scene_chars[scene_map[n]] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
 
+# 开场序幕(句 59-66)的对话跨 CG 场景显示(机甲 CG $30 与通电 CG $67 之间切换)，同一句可能
+# 在任一 CG 下出现。让这些场景**共享同一字集**——字集相同 → sorted 码位分配相同 → 块串里的字模码
+# 在这几个 bank 都指向同一字，不管在哪个 CG 显示都不会乱。(trace 按读指针时刻记 $0450，对跨 CG
+# 的开场句会记错场景；此合并绕过该问题。)
+opening_sents = [n for n in include if 59 <= n <= 66]
+if opening_sents:
+    opening_scenes = {scene_map[n] for n in opening_sents}
+    opening_chars = set()
+    for n in opening_sents:
+        opening_chars |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
+    for sc in opening_scenes:
+        scene_chars[sc] = set(opening_chars)
+
 scene_c2c = {}
 for sc, chars in sorted(scene_chars.items()):
     fb = sc | 0x80
