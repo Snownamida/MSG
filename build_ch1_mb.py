@@ -15,9 +15,12 @@ from reinsert_full import glyph8x8, ICON_REUSE
 from msgtool import Rom, iter_blocks, decode_ppu, DOUBLE_BYTE, TRIPLE_BYTE
 
 SRC = "Metal Slader Glory (Japan).nes"; OUT = "MSG-zh-demo.nes"
-CHR0 = 0x10 + 512 * 1024
+CHR0 = 0x10 + 0x100000              # CHR 起始（PRG 也扩到 1MB 后，CHR 挪到 0x100010）
 NMI2 = 0x7EB8F                      # NMI region-1 字库bank：LDA$0451;STA$045F → ORA#$80;STA$045F;NOP
-SAFE = (0x73604, 0x76000)
+# 空闲区（与 reinsert_full 一致，勿撞 0x74000-0x75B00 的 bank58 立绘/头像指针表！）：
+# text 串(每 block 1 字节，量小)放 0x73604-0x74000 真空闲区；句子 block 流放扩 PRG(0x76000+)。
+TEXT_FREE = (0x73604, 0x74000)      # block 的 1 字节 text 串（string_pointer 可达，避开立绘数据）
+BLK_FREE = (0x80010, 0x100010)      # 句子 block 流（★真·新增扩 PRG 区；0x76000-0x80010 是存活代码/数据，勿用）
 STRUCT_ZH = "translation/struct_full.tsv"   # 全量结构化译文(含回访 173-216)
 TRACE_LOGS = ("reversing/ch1_scene_map.tsv", "preview/playthrough.log", "preview/playthrough_orig.log")
 
@@ -103,8 +106,16 @@ R0 = Rom(bytes(rom))
 NAME_IDS = {b for b in iter_blocks()
             if (p := R0.block_ppu(b)) and len(p) >= 3 and p[0] == 0 and p[-1] == 0x11}
 
-# 扩 CHR→1MB（256 个 4KB bank，容纳 cg|0x80 最大 0xE7=231）
-rom[5] = 128; rom += bytes(512 * 1024)
+# 扩 PRG→1MB(句子 block 流空间，避开原 PRG 尾的立绘数据) + CHR→1MB(字库)。
+# 布局：[header][原PRG 512K][新PRG 512K][原CHR 512K][新CHR 512K]
+# ★复位向量:上电时 MMC5 $5117=$FF→末 8KB bank(1MB 时=bank127)映射 $E000-$FFFF。
+#   扩 PRG 后 bank127 是新增空区,复位向量会读到 0→崩。故把原 PRG 末 8KB(含向量+固定代码)
+#   拷到新 PRG 末 8KB,使 bank127 有效。
+rom[4] = 64; rom[5] = 128
+_prg = bytearray(rom[0x10:0x10 + 0x80000]) + bytes(0x80000)
+_prg[-0x2000:] = rom[0x10 + 0x80000 - 0x2000:0x10 + 0x80000]   # 新PRG末8KB = 原PRG末8KB(向量bank)
+_chr = bytearray(rom[0x10 + 0x80000:0x10 + 0x100000]) + bytes(0x80000)
+rom = bytearray(rom[:0x10]) + _prg + _chr
 
 # NMI 单点改：对话框字库 bank = $0450 | 0x80（替代原 B 命门硬编码 128）
 assert rom[NMI2:NMI2 + 6] == bytes([0xAD, 0x51, 0x04, 0x8D, 0x5F, 0x04]), rom[NMI2:NMI2 + 6].hex()
@@ -219,13 +230,14 @@ for bid in NAME_IDS:
 STRUCT_IDS = {b for b in range(0x20, 0x80) if (p := R0.block_ppu(b)) and p[0] == 0}
 RESERVED = NAME_IDS | STRUCT_IDS | {0x00, 0x02, 0x08, 0x09} | set(range(0x01, 0x20))
 free_blocks = iter([b for b in range(0x20, 0x80) if b not in RESERVED] + list(range(0x8080, 0x8B54)))
-p = SAFE[0]; blk_of = {}
+tp = TEXT_FREE[0]; bp = BLK_FREE[0]; blk_of = {}
 
 
 def block_for(code):
-    global p
+    global tp
     if code not in blk_of:
-        rom[p] = code; t3 = solve_text(p, 1); p += 1
+        assert tp + 1 <= TEXT_FREE[1], "text 串区满(勿撞 0x74000 立绘数据)"
+        rom[tp] = code; t3 = solve_text(tp, 1); tp += 1
         blk = next(free_blocks)
         rom[R0.text_pointer(blk):R0.text_pointer(blk) + 3] = t3
         blk_of[code] = blk
@@ -282,14 +294,16 @@ for n in include:
         elif ch in ("　", " "): emit_code(bs, c2c.get(ch) or 0xFE)
         else: emit_code(bs, c2c[ch])
     bs.append(0x00)
-    assert p + len(bs) <= SAFE[1], f"安全区溢出 @句{n}"
-    addr = p; rom[addr:addr + len(bs)] = bs; p += len(bs)
+    assert bp + len(bs) <= BLK_FREE[1], f"块串区溢出 @句{n}"
+    addr = bp; rom[addr:addr + len(bs)] = bs; bp += len(bs)
     s3 = solve_sentence(addr); assert s3, f"句{n}块串不可达"
     rom[R0.sentence_pointer(n):R0.sentence_pointer(n) + 3] = s3
     done += 1
 
-open(OUT, "wb").write(rom)
+# 立绘/头像数据完好性:bank58 的 $A000 指针表(file 0x74010)绝不能被句子/text串覆盖
 a = open(SRC, "rb").read()
-ok = all(a[lo:hi] == rom[lo:hi] for lo, hi in [(0x7FFF0, 0x80010), (0x76300, 0x76400), (0x7C000, 0x7E000)])
-print(f"\n{OUT}: 回写 {done} 句（{len(scene_c2c)} 场景bank）；安全区用 {p - SAFE[0]}/{SAFE[1] - SAFE[0]}；代码完好 {ok}")
+assert rom[0x74000:0x75B00] == a[0x74000:0x75B00], "★立绘/头像数据被覆盖!"
+open(OUT, "wb").write(rom)
+ok = all(a[lo:hi] == rom[lo:hi] for lo, hi in [(0x7FFF0, 0x80010), (0x7C000, 0x7E000), (0x74000, 0x75B00)])
+print(f"\n{OUT}: 回写 {done} 句（{len(scene_c2c)} 场景bank）；text串用 {tp - TEXT_FREE[0]}/{TEXT_FREE[1] - TEXT_FREE[0]}；句子用 {bp - BLK_FREE[0]}；立绘完好 {ok}")
 print(f"跳过(未测绘场景,留日文): {skipped}")
