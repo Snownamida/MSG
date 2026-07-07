@@ -105,26 +105,22 @@ local co = coroutine.create(function()
   -- 后续(工作间/穿梭机)走不通就切 MANUAL 交给你
 end)
 
-local dumped_at = 0
 emu.addEventCallback(function()
   frame = frame + 1
   if lastN > 0 then
     local b = rd(0x0450)
     if not scene[lastN] then scene[lastN] = {}; order[#order + 1] = lastN end
-    scene[lastN][b] = true
+    -- 每采到一个新的「句-场景」组合，立即输出一行（持续增量，不用按键）
+    if not scene[lastN][b] then scene[lastN][b] = true; emu.log(string.format("M\t%d\t%02X", lastN, b)) end
   end
   if not manual then
     if coroutine.status(co) ~= "dead" then
       pcall(coroutine.resume, co)
       if stall >= 3 then manual = true; stall = 0; emu.log("== 卡住，切 MANUAL：请手动把剧情往下推 ==") end
-    else manual = true; emu.log("== 自动序列跑完，切 MANUAL：请手动玩到章末，按 SELECT 输出 ==") end
+    else manual = true; emu.log("== 自动序列跑完，切 MANUAL：请手动玩到章末 ==") end
   end
-  pcall(emu.drawString, 8, 8, string.format("%s  %d sentences (last #%d)  [SELECT=输出]",
+  pcall(emu.drawString, 8, 8, string.format("%s  %d sentences (last #%d)  [日志持续输出，玩完全复制给我]",
     manual and "MANUAL(请手动推进)" or "AUTO", #order, lastN), manual and 0xFF4040 or 0x00FF00, 0x000000)
-  local ok, pad = pcall(emu.getInput, 0)
-  if ok and pad and pad.select and (emu.getState()["ppu.frameCount"] - dumped_at > 120) then
-    dumped_at = emu.getState()["ppu.frameCount"]; dump()
-  end
 end, emu.eventType.startFrame)
 
-emu.log("== 自动玩+采样启动：AUTO 跑，卡住变红请接管；按 SELECT 输出 MAP ==")
+emu.log("== 自动玩+采样启动：AUTO 跑，卡住变红请接管；日志持续打 M 行，玩完全复制给我 ==")
