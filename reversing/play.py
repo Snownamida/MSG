@@ -85,9 +85,12 @@ local co = coroutine.create(function()
     while rd(0x0200)~=0xF0 do coroutine.yield(); w=w+1; if w>(to or 150) then return false end end; return true end
   local function cursor_to(t) local tries=0
     while rd(0x2C)~=t and tries<24 do tap("down",4,12); tries=tries+1 end; return rd(0x2C)==t end
-  local function choose(path)  -- path如 2,1 :逐级 光标到opt(1-based)→按A;末尾把对话推到底
-    for _,opt in ipairs(path) do cursor_to(opt-1); tap("a",4,18) end
-    for _=1,60 do if not page_ready(90) then break end tap("a",4,12) end
+  local function choose(path)  -- path如 2,1 :逐级 光标到opt(1-based)→按A→推进随之对话,再选下一级
+    for _,opt in ipairs(path) do
+      cursor_to(opt-1); tap("a",4,18)
+      -- 选完这级可能先播对话(问候等)才出下一级菜单:把对话推进到底再继续
+      for _=1,40 do if not page_ready(70) then break end tap("a",4,12) end
+    end
   end
   for _,act in ipairs(ACTIONS) do
     local base, rep = act, 1

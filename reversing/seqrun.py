@@ -55,9 +55,15 @@ emu.addEventCallback(function()
 end, emu.eventType.startFrame)
 
 local REPORTED=false
+local shot_done={}
 emu.addMemoryCallback(function()
   if not LOADED then if frame>=20 then emu.loadSavestate(unhex(START_HEX)); LOADED=true end return end
   if ss_req==1 then ss_blob=emu.createSavestate(); ss_req=0 end
+  -- QA:每个新句子的对话页各截一张(去重),供拼联系表验证渲染
+  if lastN>=0 and rd(0x0200)==0xF0 and not shot_done[lastN] then
+    shot_done[lastN]=true
+    local png=emu.takeScreenshot(); print("SHOT_START s"..lastN.."_"..string.format("%02X",rd(0x0450))); print(_hex(png)); print("SHOT_END")
+  end
   if not REPORTED and (CKPT or SEQ_DONE or frame>=CAP+3000) then
     REPORTED=true
     -- 干净续跑点:输出最后一个"完成的步"的存档,下段从 last_step 接
@@ -155,8 +161,17 @@ def main():
             f.write(ln + "\n")
     print(f"本段新增句号采样 {len(nlines)} 行 → scene_map.tsv")
     pngs = extract_pngs(out, W, prefix="seq")
-    for _, p in pngs:
-        os.replace(p, os.path.join(W, "seqrun_final.png")); print("SHOT ->", os.path.join(W, "seqrun_final.png"))
+    # 每页对话截图 → 裁对话框区存 qa_pages/(跨段累积,按 句号_场景 去重)
+    from PIL import Image
+    pagedir = os.path.join(W, "qa_pages"); os.makedirs(pagedir, exist_ok=True)
+    npg = 0
+    for tag, p in pngs:
+        if tag.startswith("s"):
+            im = Image.open(p).crop((0, 160, 256, 240))
+            im.save(os.path.join(pagedir, f"{tag}.png")); npg += 1
+        elif tag == "final":
+            os.replace(p, os.path.join(W, "seqrun_final.png")); print("SHOT ->", os.path.join(W, "seqrun_final.png"))
+    print(f"本段对话页截图 {npg} 张 → qa_pages/")
     blob = extract_blob(out, "end")
     if blob:
         open(os.path.join(W, "seqrun_end.hex"), "w").write(blob); print("STATE_OUT -> seqrun_end.hex")
