@@ -94,7 +94,14 @@ emu.addEventCallback(function()
   frame=frame+1
   if coroutine.status(co)~="dead" then pcall(coroutine.resume, co) end
 end, emu.eventType.startFrame)
+local shot_done={}
 emu.addMemoryCallback(function()
+  -- QA:每个新句子的对话页各截一张(去重),供拼联系表视觉巡检
+  if lastN>=0 and rd(0x0200)==0xF0 and not shot_done[lastN] then
+    shot_done[lastN]=true
+    print("PAGE "..lastN.." "..string.format("%02X",rd(0x0450)))
+    local png=emu.takeScreenshot(); print("SHOT_START s"..lastN); print(_hex(png)); print("SHOT_END")
+  end
   -- 存档/截图须在exec回调;临近帧限或序列跑完/卡死则收尾
   if not REPORTED and (SEQ_DONE or stall>=4 or frame>=18500) then
     local why = SEQ_DONE and "序列跑完" or (stall>=4 and "卡住stall" or "临近帧限")
@@ -111,7 +118,7 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     rom = os.path.join(os.path.dirname(here), "MSG-zh-demo.nes")
     lua = LUA.replace("__NMI__", str(NMI))
-    out = run_lua(lua, rom, timeout=160)
+    out = run_lua(lua, rom, timeout=280)
     W = sys.argv[1] if len(sys.argv) > 1 else "."
     # 句号序列
     seq = [ln for ln in out.splitlines() if ln.startswith("N\t")]
@@ -123,8 +130,31 @@ def main():
     print("顺序:", " ".join(ns))
     # 截图 + 存档
     pngs = extract_pngs(out, W, prefix="auto")
-    for tag, p in pngs:
-        dst = os.path.join(W, "autorun_final.png"); os.replace(p, dst); print("SHOT ->", dst)
+    # 每句对话页截图 → 拼联系表(裁对话框区+标句号),供视觉QA
+    from PIL import Image, ImageDraw
+    pages = [(t, p) for t, p in pngs if t.startswith("s")]
+    if pages:
+        crops = []
+        for tag, p in pages:
+            n = tag[1:]
+            im = Image.open(p).crop((0, 160, 256, 240))  # 对话框区 256x80
+            im = im.resize((256 * 2, 80 * 2), Image.NEAREST)
+            d = ImageDraw.Draw(im); d.rectangle((0, 0, 44, 14), fill=(0, 0, 0)); d.text((2, 2), n, fill=(0, 255, 0))
+            crops.append((n, im))
+        cw, ch = 512, 160
+        cols = 3
+        rows = (len(crops) + cols - 1) // cols
+        sheet = Image.new("RGB", (cw * cols, ch * rows), (40, 40, 40))
+        for i, (n, im) in enumerate(crops):
+            sheet.paste(im, ((i % cols) * cw, (i // cols) * ch))
+        # 分片保存(太高会看不清)
+        per = 12  # 每张联系表12格(4行×3列)
+        for k in range(0, len(crops), per):
+            part = Image.new("RGB", (cw * cols, ch * ((min(k + per, len(crops)) - k + cols - 1) // cols)), (40, 40, 40))
+            for j, (n, im) in enumerate(crops[k:k + per]):
+                part.paste(im, ((j % cols) * cw, (j // cols) * ch))
+            dst = os.path.join(W, f"qa_sheet_{k // per}.png"); part.save(dst); print("SHEET ->", dst)
+        print(f"共 {len(crops)} 句对话页截图")
     blob = extract_blob(out, "end")
     if blob:
         open(os.path.join(W, "autorun_end.hex"), "w").write(blob)
