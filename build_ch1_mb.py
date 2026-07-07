@@ -155,7 +155,8 @@ CAP = len(rest_pool)   # 每场景独有字预算(码池去固定码)
 # (热点场景 0B海边/0E工作间/14穿梭机 主线+回访累计超 213，需 asm 加维度分第二 bank，见 REVERSING)
 group_sents = defaultdict(list)
 for n in sorted(tr):
-    if n in gui_scene and n <= 216: group_sents[group_of(gui_scene[n])].append(n)
+    # 主线 59-156 + 回访 173-216;跳过 157-172(STAFF英文名单+到空间站的第二章句,含超长独白171,会把预算撑爆)
+    if n in gui_scene and (n <= 156 or 173 <= n <= 216): group_sents[group_of(gui_scene[n])].append(n)
 include = []
 group_chars = defaultdict(set)
 for g, sents in group_sents.items():
