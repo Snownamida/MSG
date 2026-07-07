@@ -226,6 +226,12 @@ for g, sents in group_sents.items():
     for n in revisit:
         nc = chars | (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
         if len(nc) <= avail_g: keep.append(n); chars = nc
+    if os.environ.get("DIAG"):   # 诊断:全部显示句(主线+回访)的需求 vs 容量→溢出量
+        full = set()
+        for n in mainline + revisit: full |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
+        dropped = [n for n in revisit if n not in keep]
+        tag = '[' + ','.join('%02X' % s for s in sorted(g)) + ']'
+        print(f"DIAG 组{tag}: 全需求{len(full)} 可用{avail_g} 溢出{max(0,len(full)-avail_g)} 掉句{dropped}")
     for n in keep:
         include.append(n)
         group_chars[g] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
