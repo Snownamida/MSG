@@ -28,19 +28,19 @@ emu.addEventCallback(function() pcall(emu.setInput, want or IDLE, 0) end, emu.ev
 local function setbtn(name) local t={} for k,v in pairs(IDLE) do t[k]=v end if name then t[KEY[name] or name]=true end want=t end
 
 -- 场景+句号追踪
-local lastN=-1; local lastScene=-1
+local frame=0   -- 前置(N回调需读它做截图稳定判定)
+local lastN=-1; local lastScene=-1; local lastN_frame=0
 emu.addMemoryCallback(function()
   local p=rd(0x87)+rd(0x88)*256; local n
   if p>=0xBCB5 and p<0xBFFF and rd(0xA000)==prg(0) then n=(p-0xBCB5)//3
   elseif p>=0xA000 and p<0xBD4B and rd(0xA000)==prg(0x2000) then n=(p-0xA000)//3+281 end
-  if n and n~=lastN then lastN=n; print(string.format("N\t%d\t%02X", n, rd(0x0450))) end
+  if n and n~=lastN then lastN=n; lastN_frame=frame; print(string.format("N\t%d\t%02X", n, rd(0x0450))) end
 end, emu.callbackType.exec, 0xF071, 0xF071)
 
 local START_HEX="__START_HEX__"
 local START_STEP=__START_STEP__
 local CAP=__CAP__
 local LOADED=(#START_HEX==0)
-local frame=0
 local CKPT,SEQ_DONE=false,false
 local CUR_STEP=START_STEP
 local ss_req=0; local ss_blob=nil; local last_blob=nil; local last_step=START_STEP
@@ -60,9 +60,13 @@ emu.addMemoryCallback(function()
   if not LOADED then if frame>=20 then emu.loadSavestate(unhex(START_HEX)); LOADED=true end return end
   if ss_req==1 then ss_blob=emu.createSavestate(); ss_req=0 end
   -- QA:每个新句子的对话页各截一张(去重),供拼联系表验证渲染
-  if lastN>=0 and rd(0x0200)==0xF0 and not shot_done[lastN] then
+  -- 稳定后才截(lastN 在 $F071 早于渲染更新;需等 tiles+bank 都到位,否则抓到"新tiles+旧bank"过渡帧=假乱码)
+  if lastN>=0 and rd(0x0200)==0xF0 and (frame-lastN_frame)>=10 and not shot_done[lastN] then
     shot_done[lastN]=true
-    local png=emu.takeScreenshot(); print("SHOT_START s"..lastN.."_"..string.format("%02X",rd(0x0450))); print(_hex(png)); print("SHOT_END")
+    -- 记录显示时字库 bank $045F 与场景 $0450:字库应=($0450|0x80),不等则跨场景乱码
+    local sc=rd(0x0450); local fb=rd(0x045F); local p=rd(0x87)+rd(0x88)*256
+    print(string.format("PAGE n=%d ptr=%04X A000=%02X scene=%02X font=%02X expect=%02X %s", lastN, p, rd(0xA000), sc, fb, (sc|0x80), (fb==(sc|0x80)) and "OK" or "MISMATCH"))
+    local png=emu.takeScreenshot(); print("SHOT_START s"..lastN.."_"..string.format("%02X",sc)); print(_hex(png)); print("SHOT_END")
   end
   if not REPORTED and (CKPT or SEQ_DONE or frame>=CAP+3000) then
     REPORTED=true
@@ -152,7 +156,7 @@ def main():
            .replace("__START_STEP__", step).replace("__CAP__", cap))
     out = run_lua(lua, rom, timeout=int(int(cap) / 130) + 50)
     for ln in out.splitlines():
-        if ln.startswith(("DOSTEP", "DONESTEP", "END", "SCENE", "CORO_ERR")):
+        if ln.startswith(("DOSTEP", "DONESTEP", "END", "SCENE", "CORO_ERR", "PAGE")):
             print(ln)
     # 累积句号→场景映射(跨段拼全图)
     nlines = [ln for ln in out.splitlines() if ln.startswith("N\t")]
