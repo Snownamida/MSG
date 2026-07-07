@@ -36,7 +36,7 @@ CTRL_RE = re.compile(r"~([0-9A-Fa-f]{2,6})~")
 SETUP_RE = re.compile(r"\{s([0-9A-Fa-f]{2})\}")
 GAP_RE = re.compile(r"\{g([0-9A-Fa-f]{2})\}")
 ICON_RE = re.compile("|".join(re.escape(k) for k in sorted(ICON_REUSE, key=len, reverse=True)))
-UI_TILES = {0x17}
+UI_TILES = {0x17, 0x84, 0x9F, 0xAB, 0xDF, 0xEF, 0xFC}  # 0x17大括号 + 说话人小头像框复用的tile码(0x84/9F/AB/DF/EF/FC,原版是假名形当框图案,中文不用假名故保留)
 CODE_POOL = [c for c in list(range(0x2A, 0xD0)) + list(range(0xE0, 0xFE))
              if c not in ICON_REUSE.values() and c not in PUNCT_REUSE.values() and c not in UI_TILES]
 
