@@ -29,12 +29,18 @@ local function setbtn(name) local t={} for k,v in pairs(IDLE) do t[k]=v end if n
 
 -- 场景+句号追踪
 local frame=0   -- 前置(N回调需读它做截图稳定判定)
-local lastN=-1; local lastScene=-1; local lastN_frame=0
+local lastN=-1; local lastScene=-1; local lastN_frame=0; local lastptr=-1
 emu.addMemoryCallback(function()
-  local p=rd(0x87)+rd(0x88)*256; local n
+  local p=rd(0x87)+rd(0x88)*256
+  -- 旧公式 N(仅主表准,给 scene_map 向后兼容);深句靠 NRAW+宿主反查表
+  local n
   if p>=0xBCB5 and p<0xBFFF and rd(0xA000)==prg(0) then n=(p-0xBCB5)//3
   elseif p>=0xA000 and p<0xBD4B and rd(0xA000)==prg(0x2000) then n=(p-0xA000)//3+281 end
   if n and n~=lastN then lastN=n; lastN_frame=frame; print(string.format("N\t%d\t%02X", n, rd(0x0450))) end
+  -- ★NRAW:指针变化即记(A000/A001指纹+ptr+场景)→宿主用块串起始反查表映射真实句号,深句可靠
+  if p~=lastptr and p>=0xA000 then lastptr=p
+    print(string.format("NRAW\t%02X\t%02X\t%04X\t%02X", rd(0xA000), rd(0xA001), p, rd(0x0450)))
+  end
 end, emu.callbackType.exec, 0xF071, 0xF071)
 
 local START_HEX="__START_HEX__"
@@ -163,7 +169,12 @@ def main():
     with open(os.path.join(W, "scene_map.tsv"), "a") as f:
         for ln in nlines:
             f.write(ln + "\n")
-    print(f"本段新增句号采样 {len(nlines)} 行 → scene_map.tsv")
+    # ★NRAW 原始采样(A001/A001/ptr/scene)→ nraw.tsv,供宿主反查表映射真实句号(深句可靠)
+    rawlines = [ln for ln in out.splitlines() if ln.startswith("NRAW\t")]
+    with open(os.path.join(W, "nraw.tsv"), "a") as f:
+        for ln in rawlines:
+            f.write(ln + "\n")
+    print(f"本段新增句号采样 {len(nlines)} 行 → scene_map.tsv;NRAW {len(rawlines)} 行 → nraw.tsv")
     pngs = extract_pngs(out, W, prefix="seq")
     # 每页对话截图 → 裁对话框区存 qa_pages/(跨段累积,按 句号_场景 去重)
     from PIL import Image
