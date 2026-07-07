@@ -18,3 +18,4 @@ __pycache__/
 # macOS
 .DS_Store
 translation/struct_full.tsv
+preview/verify
