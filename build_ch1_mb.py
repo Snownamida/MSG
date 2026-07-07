@@ -36,7 +36,7 @@ CTRL_RE = re.compile(r"~([0-9A-Fa-f]{2,6})~")
 SETUP_RE = re.compile(r"\{s([0-9A-Fa-f]{2})\}")
 GAP_RE = re.compile(r"\{g([0-9A-Fa-f]{2})\}")
 ICON_RE = re.compile("|".join(re.escape(k) for k in sorted(ICON_REUSE, key=len, reverse=True)))
-UI_TILES = {0x17, 0x84, 0x9F, 0xAB, 0xDF, 0xEF, 0xFC}  # 0x17大括号 + 说话人小头像框复用的tile码(0x84/9F/AB/DF/EF/FC,原版是假名形当框图案,中文不用假名故保留)
+UI_TILES = {0x17, 0x84, 0x9F, 0xAB, 0xDF, 0xEF, 0xFC, 0xFD}  # 0x17大括号 + 说话人小头像框复用的tile码(0x84/9F/AB/DF/EF/FC/FD,原版是假名形当框图案/框主体填充,中文不用假名故保留;0xFD是框主填充x41,曾误当padding漏排)
 CODE_POOL = [c for c in list(range(0x2A, 0xD0)) + list(range(0xE0, 0xFE))
              if c not in ICON_REUSE.values() and c not in PUNCT_REUSE.values() and c not in UI_TILES]
 
@@ -222,17 +222,18 @@ if 0x67 in scene_c2c:
         if ch in PUNCT_REUSE: continue
         rom[CHR0 + code * 16: CHR0 + code * 16 + 16] = glyph8x8(ch)
 
-# 名字块中文化（保 [00,X] 块宽；名字在块内**左对齐**lead=0——引擎按固定起始列渲染名字块，
-# 各名字都从块起始列开始→左端对齐；原版忠有前导FE(缩进)、中文名短会参差，统一 lead=0 最整齐）
+# 名字块中文化（保 [00,X] 块宽；名字在块内**居中对齐**——复刻原版:忠=[FE 忠 FE]左右各1空格居中、
+# エリナ=[エリナ FE]尾部1空格。lead=pad//2 精确复刻原版忠的居中,同时把单字中文名(梓/查米)居中）
 for bid in NAME_IDS:
     ppu = list(R0.block_ppu(bid)); X = ppu[1]
     cn = JP2CN.get(decode_ppu(bytes(ppu[2:-1])).strip())
     if not cn or any(c not in name_code for c in cn): continue
     codes = [name_code[c] for c in cn]
-    pad = X - len(codes) - 1    # 名字左对齐(lead=0)在块起始列,尾部FE填充到「,各名字左端对齐
+    pad = X - len(codes) - 1    # 「前的总空位;居中:前导lead=pad//2,尾部trail=pad-lead
     if pad < 0: continue        # 中文名超长则跳过（保留原名字块）
+    lead = pad // 2; trail = pad - lead
     sp, _ = R0.string_pointer(R0.read3(R0.text_pointer(bid)))
-    rom[sp:sp + X + 2] = bytes([0x00, X] + codes + [0xFE] * pad + [0x11])
+    rom[sp:sp + X + 2] = bytes([0x00, X] + [0xFE] * lead + codes + [0xFE] * trail + [0x11])
 
 # char block 池（避开名字块/结构块/控制/折行/引号 ID）——block 全局共享，渲染按激活 bank 取 tile
 STRUCT_IDS = {b for b in range(0x20, 0x80) if (p := R0.block_ppu(b)) and p[0] == 0}
