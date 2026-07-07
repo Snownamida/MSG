@@ -158,6 +158,8 @@ name_chars -= set(PUNCT_REUSE)
 cross_chars = set()
 for n in cross_sents:
     if n in tr: cross_chars |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - name_chars)
+CMD_CHARS = set("查看交谈回头休息前往")  # 通用命令名的字,每场景字库必有(修0E"交谈"→"P谈"、14命令乱);过多会挤掉句子,精确命令待逐一确认
+cross_chars |= CMD_CHARS  # 并入跨场景字→每场景c2c都含(第208行)+字模注入每bank(第214行),修0E"交谈"→"P谈"、14"兴音省默"
 fixed_chars = name_chars | cross_chars
 fixed_code = dict(PUNCT_REUSE)
 for code, ch in zip(CODE_POOL, sorted(fixed_chars)): fixed_code[ch] = code
