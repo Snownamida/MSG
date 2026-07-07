@@ -136,6 +136,9 @@ gui_scene = {}   # 首次 $0450(单值,全覆盖)用于分组
 for l in open("reversing/ch1_scene_map.tsv"):
     if l.startswith("SEQ"):
         _, n, b = l.split(); gui_scene.setdefault(int(n), int(b, 16))
+# 选项深入对话(自动序列/GUI采样都没选到→未测绘): 手动补场景。183/187=海边0B梓深入对话
+# (183梓聊大海/哥哥, 187忠问梓记不记得爸爸),否则留日文乱码
+for _n in (187,): gui_scene.setdefault(_n, 0x0B)  # 187=父母的事对话(用户报);183暂不补(次要,会超预算)
 
 # 跨场景句(在多个 $0450 下显示,字须全局固定码才能各 bank 同码位):accurate 每帧采样标记的多场景句
 # + 手动补 accurate 因 lastN 滞后漏采的边界句(海边↔店门口↔店铺间反复切,用户实测句91等跨)
