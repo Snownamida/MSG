@@ -213,18 +213,17 @@ if 0x67 in scene_c2c:
         if ch in PUNCT_REUSE: continue
         rom[CHR0 + code * 16: CHR0 + code * 16 + 16] = glyph8x8(ch)
 
-# 名字块中文化（保 [00,X] 结构与前导空格；名字字用固定码，跨场景一致）
+# 名字块中文化（保 [00,X] 块宽；名字在块内**右对齐**贴「——引擎右对齐渲染名字块，
+# 中文名比日文短，若沿用原左对齐会孤零在左、离「远；右对齐让各名字右端在同列，整齐）
 for bid in NAME_IDS:
     ppu = list(R0.block_ppu(bid)); X = ppu[1]
     cn = JP2CN.get(decode_ppu(bytes(ppu[2:-1])).strip())
     if not cn or any(c not in name_code for c in cn): continue
-    content = ppu[2:]; lead = 0
-    while lead < len(content) and content[lead] == 0xFE: lead += 1
     codes = [name_code[c] for c in cn]
-    pad = X - lead - len(codes) - 1
-    if pad < 0: continue
+    lead = X - len(codes) - 2   # 前导 FE 填充，使名字紧贴「（保留末尾 1 FE 隔「，同原版）
+    if lead < 0: continue       # 中文名超长则跳过（保留原名字块）
     sp, _ = R0.string_pointer(R0.read3(R0.text_pointer(bid)))
-    rom[sp:sp + X + 2] = bytes([0x00, X] + [0xFE] * lead + codes + [0xFE] * pad + [0x11])
+    rom[sp:sp + X + 2] = bytes([0x00, X] + [0xFE] * lead + codes + [0xFE, 0x11])
 
 # char block 池（避开名字块/结构块/控制/折行/引号 ID）——block 全局共享，渲染按激活 bank 取 tile
 STRUCT_IDS = {b for b in range(0x20, 0x80) if (p := R0.block_ppu(b)) and p[0] == 0}
