@@ -126,7 +126,7 @@ rom[NMI2:NMI2 + 6] = bytes([0x09, 0x80, 0x8D, 0x5F, 0x04, 0xEA])   # ORA #$80; S
 # 海边区{0B,10,11}(海边/店门口/店铺反复切)；其余场景各自单组。名字字用全局固定码(名字块跨组
 # 共享 block，码必须处处一致)。**只回写主线 59-172**：回访句(173+)与主线同 $0450 会挤进同 bank
 # 累计超 213，暂留日文(需 asm 加维度区分同场景多访问才能上，见 REVERSING)。
-SCENE_GROUPS = [{0x0A, 0x30, 0x67}, {0x0B, 0x10, 0x11}]   # 开场CG互切组 + 海边区(海边0B/店门口10/店铺11反复切)共享字集
+SCENE_GROUPS = [{0x0A,0x30,0x67}, {0x0B,0x10,0x11}]   # 开场CG互切组 + 海边区(海边0B/店门口10/店铺11反复切,用户实测确认)共享字集
 def group_of(sc):
     for g in SCENE_GROUPS:
         if sc in g: return frozenset(g)
@@ -147,7 +147,7 @@ try:
             if len(bs.split(",")) > 1: cross_sents.add(int(n))
 except FileNotFoundError:
     pass
-cross_sents |= {65, 90, 91, 92, 94, 97, 110, 113, 114, 115}   # 65=开场跨海边;114/115=店铺跨查米店17
+cross_sents |= {65,90,91,92,94,97,110,113,114,115,122,130,140,141}  # 跨场景句:海边/开场/查米店+短转场过场句(GUI全章采样)
 
 name_chars = set()
 for cn in JP2CN.values(): name_chars |= set(cn)
