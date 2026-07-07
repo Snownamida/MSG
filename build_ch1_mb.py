@@ -37,7 +37,7 @@ SETUP_RE = re.compile(r"\{s([0-9A-Fa-f]{2})\}")
 GAP_RE = re.compile(r"\{g([0-9A-Fa-f]{2})\}")
 ICON_RE = re.compile("|".join(re.escape(k) for k in sorted(ICON_REUSE, key=len, reverse=True)))
 UI_TILES = {0x17}
-CODE_POOL = [c for c in list(range(0x20, 0xD0)) + list(range(0xE0, 0xFE))
+CODE_POOL = [c for c in list(range(0x2A, 0xD0)) + list(range(0xE0, 0xFE))
              if c not in ICON_REUSE.values() and c not in PUNCT_REUSE.values() and c not in UI_TILES]
 
 
@@ -138,7 +138,7 @@ for l in open("reversing/ch1_scene_map.tsv"):
         _, n, b = l.split(); gui_scene.setdefault(int(n), int(b, 16))
 # 选项深入对话(自动序列/GUI采样都没选到→未测绘): 手动补场景。183/187=海边0B梓深入对话
 # (183梓聊大海/哥哥, 187忠问梓记不记得爸爸),否则留日文乱码
-for _n in (187,): gui_scene.setdefault(_n, 0x0B)  # 187=父母的事对话(用户报);183暂不补(次要,会超预算)
+for _n in (183, 187): gui_scene.setdefault(_n, 0x0B)  # 187父母对话/183梓聊大海(选项深入对话,未测绘);贪心装箱按空间取舍
 
 # 跨场景句(在多个 $0450 下显示,字须全局固定码才能各 bank 同码位):accurate 每帧采样标记的多场景句
 # + 手动补 accurate 因 lastN 滞后漏采的边界句(海边↔店门口↔店铺间反复切,用户实测句91等跨)
@@ -174,12 +174,18 @@ for n in sorted(tr):
 include = []
 group_chars = defaultdict(set)
 for g, sents in group_sents.items():
-    full = set(); used_n = set()
-    for n in sents:
-        full |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
-        used_n |= (visible_chars(tr[n]) & name_chars)
+    used_n = set()
+    for n in sents: used_n |= (visible_chars(tr[n]) & name_chars)
     avail_g = len(rest_pool) + (len(name_chars) - len(used_n))   # 名字优化后该组独有字预算
-    keep = sents if len(full) <= avail_g else [n for n in sents if n <= 156]   # 装得下则含回访;否则只主线(157+=STAFF/第二章)
+    # 贪心装箱:主线(59-156)必回写;回访(173-216)按剩余空间逐句加(而非全或无,最大化回访)
+    mainline = [n for n in sents if n <= 156]
+    revisit = [n for n in sents if n > 156]
+    chars = set()
+    for n in mainline: chars |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
+    keep = list(mainline)
+    for n in revisit:
+        nc = chars | (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
+        if len(nc) <= avail_g: keep.append(n); chars = nc
     for n in keep:
         include.append(n)
         group_chars[g] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
