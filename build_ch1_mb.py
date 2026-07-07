@@ -222,16 +222,18 @@ if 0x67 in scene_c2c:
         if ch in PUNCT_REUSE: continue
         rom[CHR0 + code * 16: CHR0 + code * 16 + 16] = glyph8x8(ch)
 
-# 名字块中文化（保 [00,X] 块宽；名字在块内**居中对齐**——复刻原版:忠=[FE 忠 FE]左右各1空格居中、
-# エリナ=[エリナ FE]尾部1空格。lead=pad//2 精确复刻原版忠的居中,同时把单字中文名(梓/查米)居中）
+# 名字块中文化：引擎左顶格渲染名字块(前导FE=隐形灰底空格,首字位置=块起始列+lead)。
+# 各名字块原宽X不同(忠4/艾莉娜5/梓6…),若各自居中→首字列号成阶梯(忠C+1/梓C+2)看着没对齐。
+# 正解:①块收窄到 L+3=[FE 名 FE 「](像忠那样紧凑对称;只缩不增,防写超原块溢出相邻块)
+#       ②统一 lead=1 → 所有名字首字都在 C+1(和忠对齐),且各自左右对称(居中观感)。
 for bid in NAME_IDS:
-    ppu = list(R0.block_ppu(bid)); X = ppu[1]
+    ppu = list(R0.block_ppu(bid)); origX = ppu[1]
     cn = JP2CN.get(decode_ppu(bytes(ppu[2:-1])).strip())
     if not cn or any(c not in name_code for c in cn): continue
-    codes = [name_code[c] for c in cn]
-    pad = X - len(codes) - 1    # 「前的总空位;居中:前导lead=pad//2,尾部trail=pad-lead
-    if pad < 0: continue        # 中文名超长则跳过（保留原名字块）
-    lead = pad // 2; trail = pad - lead
+    codes = [name_code[c] for c in cn]; L = len(codes)
+    X = min(origX, L + 3)       # 尽量收窄到[FE 名 FE 「];名太长则保持原宽(绝不超原块)
+    if X < L + 2: continue       # 放不下(至少 1前导+名+「)则跳过,保留原名字块
+    lead = 1; trail = X - L - lead - 1   # 首字统一在起始列+1;尾部补到「
     sp, _ = R0.string_pointer(R0.read3(R0.text_pointer(bid)))
     rom[sp:sp + X + 2] = bytes([0x00, X] + [0xFE] * lead + codes + [0xFE] * trail + [0x11])
 
