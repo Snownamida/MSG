@@ -147,7 +147,7 @@ try:
             if len(bs.split(",")) > 1: cross_sents.add(int(n))
 except FileNotFoundError:
     pass
-cross_sents |= {90, 91, 92, 94, 97, 110, 113}
+cross_sents |= {65, 90, 91, 92, 94, 97, 110, 113}   # 65=开场异变CG跨到海边0B
 
 name_chars = set()
 for cn in JP2CN.values(): name_chars |= set(cn)
