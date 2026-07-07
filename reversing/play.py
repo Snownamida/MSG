@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mesen import run_lua, extract_pngs, extract_blob, mss_hex, NMI
 
-ROM = "MSG-zh-demo.nes"
+ROM = os.environ.get("ROM", "MSG-zh-demo.nes")
 
 
 def build_lua(start_state_hex, actions, trail=40):

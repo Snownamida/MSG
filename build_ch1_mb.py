@@ -9,14 +9,33 @@
 句→场景映射来自 mesen_ch1_playthrough.lua 的 trace（preview/playthrough*.log 的 SEQ 行）。
 名字字用固定码位（名字块跨场景共享 block，码必须在所有 bank 指向同一字）。
 """
+import os
+import sys
+# 确定性构建:set 迭代受哈希随机化影响会导致每次输出字节不同(仅字→码分配变,不影响正确性,
+# 但不可复现)。固定 PYTHONHASHSEED 后重执行一次,保证同源可复现。
+if os.environ.get("PYTHONHASHSEED") != "0":
+    os.environ["PYTHONHASHSEED"] = "0"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 import re
 from collections import defaultdict
 from reinsert_full import glyph8x8, ICON_REUSE
-from msgtool import Rom, iter_blocks, decode_ppu, DOUBLE_BYTE, TRIPLE_BYTE
+from msgtool import Rom, iter_blocks, decode_ppu, DOUBLE_BYTE, TRIPLE_BYTE, CHARSET
 
-SRC = "Metal Slader Glory (Japan).nes"; OUT = "MSG-zh-demo.nes"
+# 原版假名 → 原始 tile 码。用于在中文译文里保留原版假名(密语 "えりな もう おきなよ" 必须保假名,
+# 否则玩家学到中文却要在假名格里输入→存档功能废)。假名码从 CODE_POOL 保留(不派给中文)→各场景
+# bank(=bank0 拷贝) 那些码位保原版假名字模;编码时假名字直接走原码。
+KANA2CODE = {}
+for _c, _ch in enumerate(CHARSET):
+    if len(_ch) == 1 and ("぀" <= _ch <= "ヿ"):   # 平假名 + 片假名
+        KANA2CODE.setdefault(_ch, _c)
+
+SRC = "Metal Slader Glory (Japan).nes"; OUT = os.environ.get("OUT", "MSG-zh-demo.nes")
 CHR0 = 0x10 + 0x100000              # CHR 起始（PRG 也扩到 1MB 后，CHR 挪到 0x100010）
 NMI2 = 0x7EB8F                      # NMI region-1 字库bank：LDA$0451;STA$045F → ORA#$80;STA$045F;NOP
+NMI_R2 = 0x7EB95                    # NMI region-2 bank($EB85 LDA$0452;STA$0460)：改成 LDA#GREEN_BANK
+GREEN_BANK = 0xE0                   # 绿字(场景67 顶部 region2)专用 CHR bank(空闲)=bank0完整拷贝+句63中文
+                                    # ★绿字读 region2($0460=$0452=0=bank0),与场景00(CONTINUE/存档)抢bank0→乱码。
+                                    # 把 region2 重定向到 0xE0,bank0 保原版假名→存档屏干净,绿字照样中文。
 # 空闲区（与 reinsert_full 一致，勿撞 0x74000-0x75B00 的 bank58 立绘/头像指针表！）：
 # text 串(每 block 1 字节，量小)放 0x73604-0x74000 真空闲区；句子 block 流放扩 PRG(0x76000+)。
 TEXT_FREE = (0x73604, 0x74000)      # block 的 1 字节 text 串（string_pointer 可达，避开立绘数据）
@@ -100,6 +119,9 @@ def visible_chars(s):
 
 
 tr = load_struct(STRUCT_ZH)
+# 保留译文里出现的原版假名 tile 码(密语等)——不派给中文,使各 bank 该码位保原版假名字模。
+KANA_CODES = {KANA2CODE[ch] for s in tr.values() for ch in s if ch in KANA2CODE}
+CODE_POOL = [c for c in CODE_POOL if c not in KANA_CODES]
 scene_map = load_scenes()
 rom = bytearray(open(SRC, "rb").read())
 R0 = Rom(bytes(rom))
@@ -120,6 +142,14 @@ rom = bytearray(rom[:0x10]) + _prg + _chr
 # NMI 单点改：对话框字库 bank = $0450 | 0x80（替代原 B 命门硬编码 128）
 assert rom[NMI2:NMI2 + 6] == bytes([0xAD, 0x51, 0x04, 0x8D, 0x5F, 0x04]), rom[NMI2:NMI2 + 6].hex()
 rom[NMI2:NMI2 + 6] = bytes([0x09, 0x80, 0x8D, 0x5F, 0x04, 0xEA])   # ORA #$80; STA $045F; NOP
+
+# ★绿字重定向(Phase 2 已解):绿字=场景67 顶部 strip,其 bank 来自 $0452(经 $EB58 `LDA $0450,X` X=2),
+# 恒=0=bank0,与场景00 密语屏抢 bank0→乱码。实测 region2($0452/$0460)全程为0、仅场景67 在顶部渲染,
+# 故改 NMI $EB85 `LDA $0452; STA $0460`(region2 shadow 拷贝,region2 全未用)→ `LDA #GREEN_BANK; STA $0452; NOP`:
+# 每帧把 $0452 置 GREEN_BANK,下帧 $EB58(X=2,仅场景67)读到→绿字读 GREEN_BANK(=bank0拷贝+句63中文)。
+# 其他场景 X=0 读 $0450 不受影响;bank0 保原版假名→密语屏干净。绿字与场景00 从此各用各的 bank。
+assert rom[NMI_R2:NMI_R2 + 6] == bytes([0xAD, 0x52, 0x04, 0x8D, 0x60, 0x04]), rom[NMI_R2:NMI_R2 + 6].hex()
+rom[NMI_R2:NMI_R2 + 6] = bytes([0xA9, GREEN_BANK, 0x8D, 0x52, 0x04, 0xEA])   # LDA #GREEN_BANK; STA $0452; NOP
 
 # 场景分组装箱：CG 切换/紧密相邻的场景合并成组，组内所有 bank 共享同一字集+码位——跨 CG 或跨
 # 场景显示的句在组内任何 bank 都有字、码位一致。开场组{0A,30,67}(机甲/通电/异变CG互切)、
@@ -177,6 +207,9 @@ CAP = len(rest_pool)   # 每场景独有字预算(码池去固定码)
 group_sents = defaultdict(list)
 for n in sorted(tr):
     # 主线 59-156 + 回访 173-216;跳过 157-172(STAFF英文名单+到空间站的第二章句,含超长独白171,会把预算撑爆)
+    # ★场景00(CONTINUE/存档/密语系统屏)的句绝不改写:它用 bank0 原版假名字库渲染,且密语=假名输入,
+    #   翻成中文会毁掉存档功能。保持原版日文(句15/17/19/20 等 gui_scene==0x00 的句)。
+    if gui_scene.get(n) == 0x00: continue
     if n in gui_scene and (n <= 156 or 173 <= n <= 216): group_sents[group_of(gui_scene[n])].append(n)
 include = []
 group_chars = defaultdict(set)
@@ -223,11 +256,16 @@ for g, chars in group_chars.items():
         scene_c2c[sc] = c2c
     print(f"组 {[f'${s:02X}' for s in sorted(g)]}: 独有{len(srt)} 用到名字{len(used_names)} 可用{len(avail)}")
 
-# 绿字(句63, 场景 $67)是顶部 overlay，光栅分屏读 bank 0——把该场景字模也拷进 bank 0
-if 0x67 in scene_c2c:
-    for ch, code in scene_c2c[0x67].items():
-        if ch in PUNCT_REUSE: continue
-        rom[CHR0 + code * 16: CHR0 + code * 16 + 16] = glyph8x8(ch)
+# ★ bank0 保持原版满字库不污染(修复场景00 密语/存档屏)。原 build 把整场景67(~104字)灌进 bank0
+# 导致密语屏乱码,已删。绿字(句63 顶部 region)现回退为原版日文(读 bank0 原版假名)。
+# Phase 2 备料:GREEN_BANK(0xE0)= bank0 完整拷贝 + 句63 中文;待解决绿字读 $0452 的重定向后启用。
+gb = CHR0 + GREEN_BANK * 4096
+rom[gb:gb + 4096] = rom[CHR0:CHR0 + 4096]
+if 63 in tr and 0x67 in scene_c2c:
+    for ch in visible_chars(tr[63]):
+        code = scene_c2c[0x67].get(ch)
+        if code is None or ch in PUNCT_REUSE: continue
+        rom[gb + code * 16: gb + code * 16 + 16] = glyph8x8(ch)
 
 # 名字块中文化：引擎左顶格渲染名字块(前导FE=隐形灰底空格,首字位置=块起始列+lead)。
 # ★块宽X绝不改动(=原版=上一版汉化版,块字节数=X+2由X字节决定;一改X就出新排版问题)。
@@ -242,10 +280,29 @@ for bid in NAME_IDS:
     sp, _ = R0.string_pointer(R0.read3(R0.text_pointer(bid)))
     rom[sp:sp + X + 2] = bytes([0x00, X] + [0xFE] * lead + codes + [0xFE] * trail + [0x11])
 
-# char block 池（避开名字块/结构块/控制/折行/引号 ID）——block 全局共享，渲染按激活 bank 取 tile
+# 系统屏(场景00:CONTINUE 密语输入 / 存档)的句子不改写(保原版日文),但它们引用的 block 绝不能被
+# block_for 重分配给中文字——否则原版假名 block 的 text_pointer 被顶掉→系统屏乱码(如句22 醒来独白)。
+# 把这些句用到的 block 全部保留。SYS_SENTENCES=CONTINUE 独白(22)+存档流(15/17/19/20)+实测场景00 采样句。
+SYS_SENTENCES = {15, 17, 19, 20, 22, 293, 364, 436, 441, 708, 762, 1165, 1322, 1379, 1519, 1528}
+def _sent_block_ids(n):
+    s = R0.sentence_blocks(n); i = 0; ids = set()
+    while i < len(s):
+        b = s[i]
+        if b in TRIPLE_BYTE: i += 3; continue
+        if b in DOUBLE_BYTE: i += 2; continue
+        if b == 0x00: break
+        ids.add(b if b < 0x80 else (b << 8) | s[i + 1]); i += 1 if b < 0x80 else 2
+    return ids
+SYS_BLOCKS = set()
+for _n in SYS_SENTENCES:
+    try: SYS_BLOCKS |= _sent_block_ids(_n)
+    except Exception: pass
+
+# char block 池（避开名字块/结构块/控制/折行/引号 ID + 系统屏句 block）——block 全局共享，渲染按激活 bank 取 tile
 STRUCT_IDS = {b for b in range(0x20, 0x80) if (p := R0.block_ppu(b)) and p[0] == 0}
-RESERVED = NAME_IDS | STRUCT_IDS | {0x00, 0x02, 0x08, 0x09} | set(range(0x01, 0x20))
-free_blocks = iter([b for b in range(0x20, 0x80) if b not in RESERVED] + list(range(0x8080, 0x8B54)))
+RESERVED = NAME_IDS | STRUCT_IDS | SYS_BLOCKS | {0x00, 0x02, 0x08, 0x09} | set(range(0x01, 0x20))
+free_blocks = iter([b for b in range(0x20, 0x80) if b not in RESERVED]
+                   + [b for b in range(0x8080, 0x8B54) if b not in SYS_BLOCKS])
 tp = TEXT_FREE[0]; bp = BLK_FREE[0]; blk_of = {}
 
 
@@ -308,6 +365,7 @@ for n in include:
         ch = text[i]; i += 1
         if ch == "」": bs.append(0x09)
         elif ch in ("　", " "): emit_code(bs, c2c.get(ch) or 0xFE)
+        elif ch in KANA2CODE: emit_code(bs, KANA2CODE[ch])   # 原版假名(密语等)走原始 tile 码
         else: emit_code(bs, c2c[ch])
     bs.append(0x00)
     assert bp + len(bs) <= BLK_FREE[1], f"块串区溢出 @句{n}"
