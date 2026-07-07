@@ -37,7 +37,7 @@ SETUP_RE = re.compile(r"\{s([0-9A-Fa-f]{2})\}")
 GAP_RE = re.compile(r"\{g([0-9A-Fa-f]{2})\}")
 ICON_RE = re.compile("|".join(re.escape(k) for k in sorted(ICON_REUSE, key=len, reverse=True)))
 UI_TILES = {0x17}
-CODE_POOL = [c for c in list(range(0x10, 0xD0)) + list(range(0xE0, 0xFE))
+CODE_POOL = [c for c in list(range(0x20, 0xD0)) + list(range(0xE0, 0xFE))
              if c not in ICON_REUSE.values() and c not in PUNCT_REUSE.values() and c not in UI_TILES]
 
 
