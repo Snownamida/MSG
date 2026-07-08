@@ -46,7 +46,9 @@ local co=coroutine.create(function()
       dlg={}; nd=0; rec=true
       tap("a"); yf(34); rec=false
       local ds={}; for n,_ in pairs(dlg) do ds[#ds+1]=n end; table.sort(ds)
-      local submenu = (rd(0x0450)==sc0 and rd(0x21)>d0 and #optlabels()>0)
+      local submenu=false
+      if rd(0x0450)==sc0 then local c0=rd(0x2C); set("down");yf(3);set(nil);yf(9)
+        if rd(0x2C)~=c0 then submenu=true; local t=0; while rd(0x2C)~=0 and t<12 do set("up");yf(3);set(nil);yf(7);t=t+1 end end end
       if rd(0x0450)~=sc0 then
         print(string.format("%s%s[%d] ★前往→场景%02X", string.rep("  ",depth),path,labs[i],rd(0x0450)))
       else
