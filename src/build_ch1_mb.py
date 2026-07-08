@@ -44,7 +44,11 @@ GREEN_BANK = 0xE0                   # 绿字(场景67 顶部 region2)专用 CHR 
 #   NMI $EB7F 改 `LDA $5FFF; STA $045F`(等长6B)。ExRAM $5FA5-$5FFF 实测全章(含密语屏00)零写入;
 #   例程由 bank127(扩PRG启动副本,$5117 切走后永不执行=自由区)开机拷入 ExRAM($5104=2 仅reset设置)。
 #   共显安全:实测选话题时对话框先清屏(菜单开着时框已空),深话题句独占屏幕,B bank 只需固定字+该句字。
-B_SENTS = {187: 0xA1}     # 句号→B bank(空闲 $A1 起;bank=bank0拷贝+固定/名字字全局码+该句独有字)
+B_SENTS = {187: 0xA1,                          # 海边深话题:梓聊父亲(情感戏)
+           204: 0xA2, 205: 0xA2, 206: 0xA2, 207: 0xA2}   # 0E工作间深话题(阿源车库),共享一个B bank
+# 句号→B bank(空闲 $A1 起;bank=bank0拷贝+固定/名字字全局码+该bank各句独有字)。
+# ★只放"独占屏幕"的句(菜单深话题:选择时对话框先清屏);主线滚动句禁入(邻句共显会错bank)。
+LUA_OFF = 1               # ★Lua trace N 标签 = msgtool 句号 −1;所有 Lua 采样数据键 +1 对齐 tr 空间
 DETOUR = 0x7F091          # file: $F081 `STA $5115`(8D 15 51)
 BANK127 = 0xFE010         # file: 扩PRG末8KB=bank63启动副本
 # 空闲区（与 reinsert_full 一致，勿撞 0x74000-0x75B00 的 bank58 立绘/头像指针表！）：
@@ -105,20 +109,23 @@ def load_struct(path):
 
 def load_scenes():
     """句 → 它显示期间出现过的所有 $0450 场景(集合)。preview/accurate.log(每帧采样，准确记录
-    跨 CG 句的多场景)优先；其余句用 ch1_scene_map/playthrough 的首次 $0450(单场景)补。"""
+    跨 CG 句的多场景)优先；其余句用 ch1_scene_map/playthrough 的首次 $0450(单场景)补。
+    ★LUA_OFF:trace 的 N 标签=(p-$BCB5)//3 是 0-based slot 号,= msgtool 句号 −1(表基 $BCB5
+    即 msgtool 句1 的表项;实证 lastN=186 时屏显 tr[187])。所有 Lua 采样数据键 +1 对齐 tr 空间,
+    否则 tr[n] 按"下一句的场景"装箱→场景边界句错 bank(实测 s137_0E/s141_13 等 17 处边界乱码)。"""
     scenes = {}
     try:
         for l in open(os.path.join(_ROOT, "preview", "accurate.log")):
             if l.startswith("MAP"):
                 _, n, bs = l.strip().split("\t")
-                scenes[int(n)] = set(int(b, 16) for b in bs.split(","))
+                scenes[int(n) + LUA_OFF] = set(int(b, 16) for b in bs.split(","))
     except FileNotFoundError:
         pass
     for fn in TRACE_LOGS:
         try:
             for l in open(fn):
                 if l.startswith("SEQ"):
-                    _, n, b = l.split(); n = int(n)
+                    _, n, b = l.split(); n = int(n) + LUA_OFF
                     if n not in scenes: scenes[n] = {int(b, 16)}
         except FileNotFoundError:
             pass
@@ -253,10 +260,10 @@ def group_of(sc):
         if sc in g: return frozenset(g)
     return frozenset({sc})
 
-gui_scene = {}   # 首次 $0450(单值,全覆盖)用于分组
+gui_scene = {}   # 首次 $0450(单值,全覆盖)用于分组;键 +LUA_OFF 对齐 tr 空间(见 load_scenes 注)
 for l in open(os.path.join(_ROOT, "reversing", "data", "ch1_scene_map.tsv")):
     if l.startswith("SEQ"):
-        _, n, b = l.split(); gui_scene.setdefault(int(n), int(b, 16))
+        _, n, b = l.split(); gui_scene.setdefault(int(n) + LUA_OFF, int(b, 16))
 # 选项深入对话(自动序列/GUI采样都没选到→未测绘): 手动补场景。183/187=海边0B梓深入对话
 # (183梓聊大海/哥哥, 187忠问梓记不记得爸爸),否则留日文乱码
 for _n in (183, 187): gui_scene.setdefault(_n, 0x0B)  # 187父母对话/183梓聊大海(选项深入对话,未测绘);贪心装箱按空间取舍
@@ -270,7 +277,7 @@ sent_scenes = defaultdict(set)
 try:
     for _l in open(os.path.join(_ROOT, "reversing", "data", "ch1_scene_samples.tsv")):
         _p = _l.split()
-        if len(_p) >= 3 and _p[0] == "N": sent_scenes[int(_p[1])].add(int(_p[2], 16))
+        if len(_p) >= 3 and _p[0] == "N": sent_scenes[int(_p[1]) + LUA_OFF].add(int(_p[2], 16))
 except FileNotFoundError:
     pass
 # 只把【主线≤216】跨>1场景组的句设为全局cross(它们被改写→须各bank同码位)。
@@ -297,21 +304,28 @@ CAP = len(rest_pool)   # 每场景独有字预算(码池去固定码)
 # (热点场景 0B海边/0E工作间/14穿梭机 主线+回访累计超 213，需 asm 加维度分第二 bank，见 REVERSING)
 group_sents = defaultdict(list)
 for n in sorted(tr):
-    # 主线 59-156 + 回访 173-216;跳过 157-172(STAFF英文名单+到空间站的第二章句,含超长独白171,会把预算撑爆)
+    # 主线 ≤157 + 回访 174-217(tr空间;原 Lua 标定 59-156/173-216 整体+1,见 LUA_OFF)
+    # 跳过 158-173(STAFF英文名单+到空间站的第二章句,含超长独白,会把预算撑爆)
     # ★场景00(CONTINUE/存档/密语系统屏)的句绝不改写:它用 bank0 原版假名字库渲染,且密语=假名输入,
-    #   翻成中文会毁掉存档功能。保持原版日文(句15/17/19/20 等 gui_scene==0x00 的句)。
+    #   翻成中文会毁掉存档功能。保持原版日文(gui_scene==0x00 的句)。
     if gui_scene.get(n) == 0x00: continue
     if n in B_SENTS: continue   # ★B句走独立第二bank(硬骨头③),不占场景组码池
-    if n in gui_scene and (n <= 156 or 173 <= n <= 216): group_sents[group_of(gui_scene[n])].append(n)
+    if n in gui_scene and (n <= 157 or 174 <= n <= 217): group_sents[group_of(gui_scene[n])].append(n)
 include = []
 group_chars = defaultdict(set)
+group_kana_free = {}   # 组 → 可回收的假名码(该组候选句用不到的;全局假名保留只对需要的组生效)
+_KANA_LIST = sorted(KANA_CODES)
 for g, sents in group_sents.items():
     used_n = set()
     for n in sents: used_n |= (visible_chars(tr[n]) & name_chars)
-    avail_g = len(rest_pool) + (len(name_chars) - len(used_n))   # 名字优化后该组独有字预算
-    # 贪心装箱:主线(59-156)必回写;回访(173-216)按剩余空间逐句加(而非全或无,最大化回访)
-    mainline = [n for n in sents if n <= 156]
-    revisit = [n for n in sents if n > 156]
+    # ★假名码按组回收:KANA_CODES 全局从 CODE_POOL 保留是为密语(句154,仅场景14)——
+    # 该组候选句用不到的假名码归还本组码池(bank=bank0拷贝,回收位注入中文字模,其余组不受影响)
+    _gk = {KANA2CODE[ch] for n in sents for ch in tr[n] if ch in KANA2CODE}
+    group_kana_free[g] = [c for c in _KANA_LIST if c not in _gk]
+    avail_g = len(rest_pool) + (len(name_chars) - len(used_n)) + len(group_kana_free[g])   # 名字优化+假名回收后预算
+    # 贪心装箱:主线(≤157)必回写;回访(174-217)按剩余空间逐句加(而非全或无,最大化回访)
+    mainline = [n for n in sents if n <= 157]
+    revisit = [n for n in sents if n > 157]
     chars = set()
     for n in mainline: chars |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
     keep = list(mainline)
@@ -343,7 +357,7 @@ for g, chars in group_chars.items():
         if group_of(gui_scene[n]) == g:
             used_names |= (visible_chars(tr[n]) & name_chars)
     unused_name_codes = [name_code[nm] for nm in name_chars if nm not in used_names]
-    avail = rest_pool + unused_name_codes
+    avail = rest_pool + unused_name_codes + group_kana_free.get(g, [])
     srt = sorted(chars)
     assert len(srt) <= len(avail), f"组{[f'${s:02X}' for s in sorted(g)]}: 独有{len(srt)} > 可用{len(avail)}"
     c2c = dict(PUNCT_REUSE)
@@ -360,13 +374,18 @@ for g, chars in group_chars.items():
     print(f"组 {[f'${s:02X}' for s in sorted(g)]}: 独有{len(srt)} 用到名字{len(used_names)} 可用{len(avail)}")
 
 # ★硬骨头③:B句独立字库 bank + 专属 c2c。固定字/名字保全局码(与 A bank 同码位→切换瞬间共显安全),
-# 该句独有字独占整个剩余码池(独立bank无同屏竞争;实测选话题先清屏,深话题句独占屏幕)。
+# 同 bank 各句合并一套 c2c(共享码池;同bank句间共显也安全),独有字独占剩余码池。
 b_c2c = {}
-for _n, _bank in sorted(B_SENTS.items()):
-    if _n not in tr: continue
-    _used_names = visible_chars(tr[_n]) & name_chars
-    _own = sorted(visible_chars(tr[_n]) - set(PUNCT_REUSE) - fixed_chars - name_chars)
-    assert len(_own) <= len(rest_pool), f"B句{_n}独有字{len(_own)}超单bank码池{len(rest_pool)}"
+_bank_sents = defaultdict(list)
+for _n, _bank in B_SENTS.items():
+    if _n in tr: _bank_sents[_bank].append(_n)
+for _bank, _ns in sorted(_bank_sents.items()):
+    _used_names, _own = set(), set()
+    for _n in _ns:
+        _used_names |= (visible_chars(tr[_n]) & name_chars)
+        _own |= (visible_chars(tr[_n]) - set(PUNCT_REUSE) - fixed_chars - name_chars)
+    _own = sorted(_own)
+    assert len(_own) <= len(rest_pool), f"B bank ${_bank:02X} 独有字{len(_own)}超单bank码池{len(rest_pool)}"
     _c = dict(PUNCT_REUSE)
     for ch in cross_chars: _c[ch] = fixed_code[ch]
     for nm in _used_names: _c[nm] = name_code[nm]
@@ -375,8 +394,8 @@ for _n, _bank in sorted(B_SENTS.items()):
     for ch, code in _c.items():
         if ch in PUNCT_REUSE: continue
         rom[CHR0 + _bank * 4096 + code * 16: CHR0 + _bank * 4096 + code * 16 + 16] = glyph8x8(ch)
-    b_c2c[_n] = _c
-    print(f"B句{_n}: bank ${_bank:02X} 独有字{len(_own)} 名字{len(_used_names)}")
+    for _n in _ns: b_c2c[_n] = _c
+    print(f"B bank ${_bank:02X}: 句{sorted(_ns)} 独有字{len(_own)} 名字{len(_used_names)}")
 
 # ★ bank0 保持原版满字库不污染(修复场景00 密语/存档屏)。原 build 把整场景67(~104字)灌进 bank0
 # 导致密语屏乱码,已删。绿字(句63 顶部 region)现回退为原版日文(读 bank0 原版假名)。
