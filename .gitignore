@@ -9,13 +9,17 @@ translation/batches/
 translation/out/
 translation/script_zh.tsv
 translation/ch1/
-preview/
-patch_poc.py
-
-# Python
-__pycache__/
-
-# macOS
-.DS_Store
 translation/struct_full.tsv
-preview/verify
+
+# 含译文的产物 / 文档（版权，切勿提交；技术文档不含大段译文，照常入库）
+docs/CHAPTER1.md
+reversing/data/chapter_map.json
+reversing/data/chapter_map.md
+
+# 实验性 PoC / 预览截图与日志
+patch_poc.py
+preview/
+
+# Python / macOS
+__pycache__/
+.DS_Store

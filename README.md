@@ -1,56 +1,67 @@
-# 合金月神（Metal Slader Glory）文本导出
+# 合金月神（Metal Slader Glory）中文化
 
-[HAL 研究所 1991 年的 FC 视觉小说《Metal Slader Glory》](https://en.wikipedia.org/wiki/Metal_Slader_Glory)
-文本量巨大（当年唯一的 1MB FC 卡带），剧本在 ROM 里以**两级字典压缩**存储。
-本项目逆向了这套文本系统，把全部 2781 句日文剧本解出为可读文本——汉化的第一步。
+[HAL 研究所 1991 年的 FC 视觉小说《Metal Slader Glory》](https://en.wikipedia.org/wiki/Metal_Slader_Glory)——
+当年唯一的 1MB FC 卡带，文本量巨大，剧本以**两级字典压缩**存储。本项目逆向了整套文本 / 渲染引擎，
+把全部 2781 句剧本解出、翻译并回写，目标是一个**完整可玩的中文版**。
 
-## 文本系统结构（逆向成果）
+## 当前状态
+
+- **第一章可玩版**：118 句主线 + 41 回访对话中文化；立绘/头像/启动/密语存档全部正常。
+- **引擎逆向**：文本系统、MMC5 分屏渲染、字库 bank 机制、内存映射全部摸清（见 `docs/`）。
+- **多 bank 字库**：靠单点 asm 钩子让每个场景自动用独立中文字库 bank，绕开 256 tile/bank 限制。
+- 进行中：全量翻译推广、热点场景第二 bank、句子地图导出 Ink（文字游玩）。
+
+ROM 请**自备**（版权原因不随仓库分发），放入 `roms/`，命名 `Metal Slader Glory (Japan).nes`。
+
+## 目录结构
 
 ```
-句子编号(1~2781) ──算术──▶ 句子指针 ──读3B──▶ 句子
-    ──bank运算──▶ 文本块串指针 ──读到0x00──▶ 文本块串
-    ──拆分──▶ 文本块 block（<0x80 单字节 / ≥0x80 双字节；即 MTE 字典）
-    ──查表──▶ 文本指针 ──读3B──▶ 文本
-    ──位运算解包──▶ 字符串地址+长度 ──读──▶ PPU 编码串
-    ──码表──▶ Unicode 文本
+src/          汉化构建工具链（从项目根运行）
+  msgtool.py       文本系统解析/导出（零依赖）
+  structio.py      结构化导出/回写（保留演出 token）
+  reinsert_full.py 全量回写编码器（装箱架构）
+  build_ch1_mb.py  第一章多 bank 构建（主入口）
+roms/         ROM 与 .cdl（gitignored）
+docs/         结构化知识库 ↓
+reversing/
+  tools/           逆向工具（dis6502 反汇编、mesen 无头驱动、seqrun/play/crawler…）
+  senmap/          句子地图爬虫（菜单树 DFS）
+  data/            trace / 场景映射 / 句子地图产物
+lua/          Mesen Lua 脚本（GUI/无头 trace、自动游玩）
+fonts/        Fusion Pixel Font（OFL，随仓库）
+translation/  译文 WIP + 术语表（译文内容 gitignored）
+archive/      历史脚本存档（不再维护）
 ```
 
-关键常量：句子表 `0x1CC5`（2781 条 × 3B）、block→文本表 `0x3D5C`、
-块串按 bank 散布在 PRG 各处；控制码分双字节（05/07/0B/0C/13/14/16/18）与
-三字节（0F/10/12/17）两类；PPU 串层另有 0x0E/0x0F 浊音·半浊音前缀。
+## 文档（`docs/`）
 
-## 用法
+| 文档 | 内容 |
+|---|---|
+| [TEXT_SYSTEM.md](docs/TEXT_SYSTEM.md) | 文本系统：两级字典压缩、编码、控制码、数据流 |
+| [ENGINE.md](docs/ENGINE.md) | 渲染引擎：MMC5、tile 几何、例程地图、分屏、两套 emit |
+| [MEMMAP.md](docs/MEMMAP.md) | 逐字节内存 / 寄存器映射表 |
+| [LOCALIZATION.md](docs/LOCALIZATION.md) | 汉化实现方案（字模 / bank / 回写 / 密语），当前限制 |
+| [HISTORY.md](docs/HISTORY.md) | 研发历程时间线（里程碑、死胡同、教训） |
+| CHAPTER1.md | 第一章内容地图（流程/机制/对话，**含译文故 gitignore**） |
 
-ROM 请**自备**（版权原因不随仓库分发），命名为 `Metal Slader Glory (Japan).nes`
-放在本目录（或用 `--rom` 指定）。仅需 Python 3.9+，零依赖。
+## 快速上手
 
 ```bash
-python3 msgtool.py export -o script_ja.txt   # 导出全部 2781 句（含 ~控制码~）
-python3 msgtool.py export --no-codes         # 纯文本（阅读用）
-python3 msgtool.py blocks -o blocks_ja.txt   # 导出 MTE 字典（全部文本块）
-python3 msgtool.py used                      # 用 FCEUX .cdl 统计实际用到的句子
-python3 msgtool.py map                       # PRG 文本数据分布图（回写规划用）
+# 导出日文剧本 / 字典 / 用途图谱
+python3 src/msgtool.py export
+python3 src/msgtool.py map
+
+# 构建第一章汉化 ROM（→ roms/MSG-zh-demo.nes）
+python3 src/build_ch1_mb.py
+
+# 无头逆向观测（需 Mesen.app）
+python3 reversing/tools/play.py --shot out.png
 ```
 
-已入库的导出结果：[`script_ja.txt`](script_ja.txt)（全剧本）、[`blocks_ja.txt`](blocks_ja.txt)（字典）。
-
-## 历史
-
-- 2020-12：用 C（Visual Studio）完成逆向与首版导出器——当时兼有练 C 的目的。
-  C 版本完整保留在 git 历史中：tag [`c-final`](../../tree/c-final)。
-- 2026-07：重写为零依赖的单文件 Python（`msgtool.py`），并与 C 版逐句对账验证：
-  2156 句逐字一致；617 句差异源于 C 旧版把 0x04/0x06 当终止符提前截断
-  （最终版 C 源码中已注释掉该行为，本版与最终版一致）；8 句差异源于旧码表
-  占位符（`（伏）`→`状`、`（了）`→`了` 等）。另修复了 C 版浊音前缀在串尾时的
-  越界读。
-
-## 后续（汉化路线图）
-
-- [x] 文本导出（`msgtool.py`）
-- [ ] 翻译（2781 句日→中，可并行）
-- [~] 回写工具（`reinsert.py`）：**单句内核跑通** —— 重建到空闲区 + text 指针反解 + 块串就地重建；句 62 round-trip 一致、零副作用。待扩展全量（中文字典构建；>256 字需配合 bank 切换）。
-- [ ] 字库/引擎：8×8 已实证太糊，需 16×16 + 渲染例程改造（MMC5 扩展属性模式，见上文路线）——最大难点
+脚本用 `ROOT` 锚定（`__file__` 相对定位），可从任意目录运行。仅需 Python 3.9+；
+`reinsert_full` 的字模渲染需 Pillow。
 
 ## 许可
 
-代码 MIT © Snownamida。游戏文本版权归 HAL 研究所，导出文本仅供研究与爱好者翻译。
+代码 MIT © Snownamida。游戏文本 / 剧本版权归 HAL 研究所，逆向与译文仅供研究和爱好者翻译，
+不随仓库分发。字体 Fusion Pixel Font 为 OFL 授权。

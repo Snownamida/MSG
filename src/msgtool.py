@@ -27,8 +27,10 @@ from pathlib import Path
 
 # ---------------- 常量（来自逆向，见 git 历史中的 typeDef.h） ----------------
 
-ROM_DEFAULT = "Metal Slader Glory (Japan).nes"
-CDL_DEFAULT = "Metal Slader Glory (Japan).cdl"
+import os
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # src/x.py → 项目根
+ROM_DEFAULT = os.path.join(_ROOT, "roms", "Metal Slader Glory (Japan).nes")
+CDL_DEFAULT = os.path.join(_ROOT, "roms", "Metal Slader Glory (Japan).cdl")
 
 SENTENCE_TOTAL = 2781
 SENTENCE_PTR_START = 0x1CC5     # 句子指针表起点（.nes 文件偏移，含 16B header）

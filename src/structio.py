@@ -14,8 +14,10 @@ token 约定：
                  0x4B。同内容异 ID 的空隙块有 17 个，拍平成空格必丢演出，必须保留 ID）
   `~XXXX~`    —— 块级控制码（停顿/颜色/等待等，不透明保留；位置相关效果靠它）
 """
+import os
 from msgtool import Rom, DOUBLE_BYTE, TRIPLE_BYTE
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # src/x.py → 项目根
 FOLD = 0x02
 
 
@@ -79,7 +81,7 @@ def _sig_from_structured(s: str):
 
 
 if __name__ == "__main__":
-    R = Rom(open("Metal Slader Glory (Japan).nes", "rb").read())
+    R = Rom(open(os.path.join(_ROOT, "roms", "Metal Slader Glory (Japan).nes"), "rb").read())
     # round-trip：结构化 token 串里的结构元素 == 块串里的结构元素（无丢失）
     bad = 0
     gap_sents = 0

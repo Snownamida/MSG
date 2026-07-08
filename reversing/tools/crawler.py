@@ -165,7 +165,7 @@ end)
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    rom = os.path.join(os.path.dirname(here), "MSG-zh-demo.nes")
+    rom = os.path.join(os.path.dirname(os.path.dirname(here)), "roms", "MSG-zh-demo.nes")
     W = sys.argv[1] if len(sys.argv) > 1 else "."
     state = sys.argv[2] if len(sys.argv) > 2 else None
     hexs = open(state).read().strip() if state and os.path.exists(state) else ""

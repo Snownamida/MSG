@@ -41,6 +41,6 @@ end, emu.callbackType.exec, __NMI__, __NMI__)
 
 lua = LUA.replace("__BLOB__", blob).replace("__NMI__", str(NMI))
 here = os.path.dirname(os.path.abspath(__file__))
-rom = os.path.join(os.path.dirname(here), "MSG-zh-demo.nes")
+rom = os.path.join(os.path.dirname(os.path.dirname(here)), "roms", "MSG-zh-demo.nes")
 out = run_lua(lua, rom, timeout=45)
 print(out)

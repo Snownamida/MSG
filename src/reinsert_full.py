@@ -17,12 +17,14 @@
 空间布局（避免四结构互撞，均在各自可达范围）：
   句子表 0x1CC5 / 文本表 0x3D5C / PPU 串区 0x5F60-0x76000 / 块串区 0x76000-0x100010（扩 PRG→1MB）。
 """
+import os
 import re
 from PIL import Image, ImageDraw, ImageFont
 from msgtool import Rom, DOUBLE_BYTE, TRIPLE_BYTE
 
-SRC = "Metal Slader Glory (Japan).nes"
-FONT = "fonts/fusion-pixel-8px-monospaced-zh_hans.otf"
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # src/x.py → 项目根
+SRC = os.path.join(_ROOT, "roms", "Metal Slader Glory (Japan).nes")
+FONT = os.path.join(_ROOT, "fonts", "fusion-pixel-8px-monospaced-zh_hans.otf")
 CHR0 = 0x10 + 512 * 1024
 NEWBANK = 128                       # 字库起始 CHR bank（0-127 = 原版 CG，128+ = 中文字库）
 CAP = 216                           # 每 bank 可用字模码数（保守：预留 0xD0-0xDF 边框区）
@@ -220,7 +222,7 @@ def _norm(s):
     return re.sub(r"~([0-9A-Fa-f]+)~", lambda m: "~" + m.group(1).upper() + "~", s)
 
 
-def load_translation(path="translation/script_zh.tsv"):
+def load_translation(path=os.path.join(_ROOT, "translation", "script_zh.tsv")):
     tr = {}
     for line in open(path, encoding="utf-8"):
         line = line.rstrip("\n")
@@ -238,7 +240,7 @@ if __name__ == "__main__":
     # demo：把开场幕（句 55-100：做梦→机甲→通电→故障→去店铺）优先塞进 bank 0，
     # 这样默认 bank 128 就显示开场中文，无需 asm 钩子即可实机验证真实译文管线。
     priority = range(55, 101) if demo else ()
-    out = "MSG-zh-demo.nes" if demo else "MSG-zh-full.nes"
+    out = os.path.join(_ROOT, "roms", "MSG-zh-demo.nes" if demo else "MSG-zh-full.nes")
     enc = Encoder(tr, priority=priority)
     print(f"装箱：{enc.nbanks} 个字库 bank（CHR {NEWBANK}..{NEWBANK + enc.nbanks - 1}，可用 128），"
           f"超容需拆页的句：{enc.oversized}")

@@ -116,7 +116,7 @@ end, emu.callbackType.exec, __NMI__, __NMI__)
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    rom = os.path.join(os.path.dirname(here), "MSG-zh-demo.nes")
+    rom = os.path.join(os.path.dirname(os.path.dirname(here)), "roms", "MSG-zh-demo.nes")
     lua = LUA.replace("__NMI__", str(NMI))
     out = run_lua(lua, rom, timeout=280)
     W = sys.argv[1] if len(sys.argv) > 1 else "."

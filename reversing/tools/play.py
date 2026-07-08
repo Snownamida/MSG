@@ -172,7 +172,7 @@ def main():
     actions = a.actions.split()
     lua = build_lua(start, actions, a.trail)
     here = os.path.dirname(os.path.abspath(__file__))
-    rom = os.path.join(os.path.dirname(here), ROM)
+    rom = os.path.join(os.path.dirname(os.path.dirname(here)), "roms", ROM)
     out = run_lua(lua, rom, timeout=a.timeout)
 
     # 非截图/blob 的普通输出

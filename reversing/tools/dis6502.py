@@ -4,10 +4,12 @@
 All offsets in comments are .nes FILE offsets (16B header included) unless noted
 'PRG' (0-based into PRG ROM, = file-0x10) or 'CPU' (6502 address space).
 """
+import os
 import sys
 
-ROM = "/Users/jixiang.sun/Projects/snownamida-upgrades/MSG/Metal Slader Glory (Japan).nes"
-CDL = "/Users/jixiang.sun/Projects/snownamida-upgrades/MSG/Metal Slader Glory (Japan).cdl"
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tools/→reversing/→项目根
+ROM = os.path.join(_ROOT, "roms", "Metal Slader Glory (Japan).nes")
+CDL = os.path.join(_ROOT, "roms", "Metal Slader Glory (Japan).cdl")
 
 data = open(ROM, "rb").read()
 PRG = data[0x10:0x10 + 0x80000]      # 512KB

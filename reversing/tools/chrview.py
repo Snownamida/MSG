@@ -1,5 +1,6 @@
+import os
 import sys
-sys.path.insert(0, "/private/tmp/claude-503/-Users-jixiang-sun-Projects-tgv-max/6ee4126c-ad90-4808-b96c-110a492f5d58/scratchpad")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 同目录 dis6502
 from dis6502 import CHR, CDL_CHR
 
 def tile(bank4k, t):

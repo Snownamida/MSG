@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
+import os
 import sys
-sys.path.insert(0, "/private/tmp/claude-503/-Users-jixiang-sun-Projects-tgv-max/6ee4126c-ad90-4808-b96c-110a492f5d58/scratchpad")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 同目录 dis6502
 from dis6502 import PRG, CHR, CDL_PRG, CDL_CHR
 
 def bank_of(off): return off // 0x2000  # 8KB bank index
