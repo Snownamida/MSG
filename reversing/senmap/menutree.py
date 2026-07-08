@@ -68,15 +68,18 @@ emu.addMemoryCallback(function()
 end, emu.callbackType.exec, __NMI__, __NMI__)
 '''
 LUA=LUA.replace("__BLOB__",blob).replace("__NMI__",str(NMI))
-out=run_lua(LUA,"/Users/jixiang.sun/Projects/snownamida-upgrades/MSG//Users/jixiang.sun/Projects/snownamida-upgrades/MSG/roms/MSG-zh-demo.nes",timeout=300)
+out=run_lua(LUA,_ROOT+"/roms/MSG-zh-demo.nes",timeout=300)
 TR={}
 for l in open(_ROOT+"/translation/struct_full.tsv",encoding="utf-8"):
     if "\t" in l:
         a,b=l.split("\t",1)
         if a.strip().isdigit(): TR[int(a)]=re.sub(r'~[0-9A-Fa-f]+~|\{[sg][0-9A-Fa-f]{2}\}','',b).replace('/',' ').strip()
 def s(n): return TR.get(n+1,f"?{n}")[:10]
+def isl(n):
+    t=TR.get(n+1,"")
+    return len(t)<=7 and "「" not in t
 for l in out.splitlines():
     if l.startswith(("==","TREE","TO","ERR")) or "[" in l:
         l=re.sub(r"\[(\d+)\]",lambda m:f"[{s(int(m.group(1)))}]",l)
-        l=re.sub(r"\{([\d,]+)\}",lambda m:"{"+",".join(s(int(x)) for x in m.group(1).split(",") if x)+"}",l)
+        l=re.sub(r"\{([\d,]+)\}",lambda m:"{"+",".join(s(int(x)) for x in m.group(1).split(",") if x and not isl(int(x)))+"}",l)
         print(l)
