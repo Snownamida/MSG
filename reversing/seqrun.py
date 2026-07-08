@@ -29,6 +29,7 @@ local function setbtn(name) local t={} for k,v in pairs(IDLE) do t[k]=v end if n
 
 -- 场景+句号追踪
 local frame=0   -- 前置(N回调需读它做截图稳定判定)
+local SAVE_SCENES=(__SAVESCENES__==1); local scene_saved={}
 local lastN=-1; local lastScene=-1; local lastN_frame=0; local lastptr=-1
 emu.addMemoryCallback(function()
   local p=rd(0x87)+rd(0x88)*256
@@ -65,6 +66,13 @@ local shot_done={}
 emu.addMemoryCallback(function()
   if not LOADED then if frame>=20 then emu.loadSavestate(unhex(START_HEX)); LOADED=true end return end
   if ss_req==1 then ss_blob=emu.createSavestate(); ss_req=0 end
+  -- 每场景入口 checkpoint(SAVE_SCENES 环境):新场景第一次到"输入就绪的菜单态"时存档,供逐场景爬菜单树
+  if SAVE_SCENES then local sc=rd(0x0450)
+    if not scene_saved[sc] and rd(0x0200)~=0xF0 and rd(0x17)==0x10 then
+      scene_saved[sc]=true
+      print("SCENECKPT "..string.format("%02X",sc).." "..(_hex(emu.createSavestate())))
+    end
+  end
   -- QA:每个新句子的对话页各截一张(去重),供拼联系表验证渲染
   -- 稳定后才截(lastN 在 $F071 早于渲染更新;需等 tiles+bank 都到位,否则抓到"新tiles+旧bank"过渡帧=假乱码)
   if lastN>=0 and rd(0x0200)==0xF0 and (frame-lastN_frame)>=10 and not shot_done[lastN] then
@@ -158,9 +166,17 @@ def main():
     step = sys.argv[3] if len(sys.argv) > 3 else "0"
     hexs = open(state).read().strip() if state and os.path.exists(state) else ""
     cap = os.environ.get("SEQ_CAP", "16000")
+    savescenes = "1" if os.environ.get("SAVE_SCENES") else "0"
     lua = (LUA.replace("__NMI__", str(NMI)).replace("__START_HEX__", hexs)
-           .replace("__START_STEP__", step).replace("__CAP__", cap))
+           .replace("__START_STEP__", step).replace("__CAP__", cap).replace("__SAVESCENES__", savescenes))
     out = run_lua(lua, rom, timeout=int(int(cap) / 130) + 50)
+    # 每场景入口 checkpoint → scene_ckpt/<hex>
+    ckdir = os.path.join(W, "scene_ckpt"); os.makedirs(ckdir, exist_ok=True)
+    for ln in out.splitlines():
+        if ln.startswith("SCENECKPT "):
+            p = ln.split(" ", 2)
+            fn = os.path.join(ckdir, f"scene_{p[1]}.hex")
+            if not os.path.exists(fn): open(fn, "w").write(p[2]); print("SCENECKPT ->", fn)
     for ln in out.splitlines():
         if ln.startswith(("DOSTEP", "DONESTEP", "END", "SCENE", "CORO_ERR", "PAGE")):
             print(ln)
