@@ -1,19 +1,10 @@
 # 游戏 ROM —— 请自备，切勿提交（版权）
 *.nes
 
-# 从 ROM 提取的日文原剧本 & 译文 WIP（版权/衍生，切勿提交；工具可自行导出）
-scratch_script.json
-script_ja.txt
-blocks_ja.txt
+# 中间产物(批次/早期单章实验/冗余渲染版;定稿见 struct_full 与 docs/)
 translation/batches/
 translation/out/
-translation/script_zh.tsv
 translation/ch1/
-translation/struct_full.tsv
-
-# 含译文的产物 / 文档（版权，切勿提交；技术文档不含大段译文，照常入库）
-docs/CHAPTER1.md
-reversing/data/chapter_map.json
 reversing/data/chapter_map.md
 
 # 实验性 PoC / 预览截图与日志

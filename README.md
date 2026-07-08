@@ -29,7 +29,7 @@ reversing/
   data/            trace / 场景映射 / 句子地图产物
 lua/          Mesen Lua 脚本（GUI/无头 trace、自动游玩）
 fonts/        Fusion Pixel Font（OFL，随仓库）
-translation/  译文 WIP + 术语表（译文内容 gitignored）
+translation/  译文（结构化定稿 struct_full + flat 草稿）+ 术语表
 archive/      历史脚本存档（不再维护）
 ```
 
@@ -42,7 +42,7 @@ archive/      历史脚本存档（不再维护）
 | [MEMMAP.md](docs/MEMMAP.md) | 逐字节内存 / 寄存器映射表 |
 | [LOCALIZATION.md](docs/LOCALIZATION.md) | 汉化实现方案（字模 / bank / 回写 / 密语），当前限制 |
 | [HISTORY.md](docs/HISTORY.md) | 研发历程时间线（里程碑、死胡同、教训） |
-| CHAPTER1.md | 第一章内容地图（流程/机制/对话，**含译文故 gitignore**） |
+| [CHAPTER1.md](docs/CHAPTER1.md) | 第一章内容地图（流程/机制/各场景对话） |
 
 ## 快速上手
 
@@ -63,5 +63,5 @@ python3 reversing/tools/play.py --shot out.png
 
 ## 许可
 
-代码 MIT © Snownamida。游戏文本 / 剧本版权归 HAL 研究所，逆向与译文仅供研究和爱好者翻译，
-不随仓库分发。字体 Fusion Pixel Font 为 OFL 授权。
+代码 MIT © Snownamida。游戏文本 / 剧本版权归 HAL 研究所，逆向与译文仅供研究和爱好者翻译交流。
+ROM 请自备（不随仓库分发）。字体 Fusion Pixel Font 为 OFL 授权。
