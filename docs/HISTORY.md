@@ -119,3 +119,21 @@ build 曾把它当空闲挪用 → 属性 fallback。修复：一切结构块保
   零页签名去重。带回溯的自动爬虫（`reversing/senmap/`）建每场景菜单树 → 全章句子地图。
 - **项目重构**：ROM 集中 `roms/`、构建链入 `src/`、逆向工具入 `reversing/tools|data`、Lua 入 `lua/`、
   知识文档从日记式 `REVERSING.md` 重组为主题化 `docs/`。
+
+### 硬骨头③ — 句级切换字库 bank（实机验证）
+
+让溢出句（187）用第二字库 bank。方案演进：WRAM 路线（游戏 0 写入但写保护未开、真机可能无 RAM）
+→ **ExRAM 路线**（`$5FA5-$5FFF` 动态全章零写入、`$5104=2` 仅 reset 设一次）。
+detour `$F081`（读句指针例程尾，等长 `JSR $5FA5`）+ ExRAM 例程维护 shadow + NMI 改读 shadow +
+bank127 开机 shim 拷入。四个连环坑，全部实测抓获：
+1. **bank 切换必须无缝交接**：shim 尾部做 `STA $5117` → 切换后下一条指令从 bank63 同地址取 =
+   无关代码 → 上电即崩。修：redirect 挪早一条指令，`JMP` 回原位切换（两 bank 该处内容一致）。
+2. **通用例程需强守卫**：`$F06F` 被渲染层复用（$87 指向其他表、某些 bank 首字节恰=0），
+   B 句显示中途 shadow 被重置 → 乱码。修：`$88∈[$BC,$C0)` 范围守卫。
+3. **表项 ±2 容差**：引擎显示期间以表项 +1/+2 偏移重读指针，精确匹配漏掉。修：lo 差 <3 判命中。
+4. **存档快照包含 ExRAM**：旧 checkpoint 把旧例程灌回去，"修复无效"白查一轮。修：payload 一变
+   即重新生成 checkpoint。
+另捕获**全局 off-by-one**：Lua trace 的 N 标签 = msgtool 句号 −1（实证：lastN=186 时屏显 tr[187]）；
+build 自洽（tr[n]↔slot n），B-list 指针直接由 `sentence_pointer(n)` 换算免疫。
+副产物：修 `mesen.py run_lua` stdout 管道静默失败（改临时文件重定向）。
+实机：句 187 两页爸爸戏完整中文（bank $A1），shadow 全程稳定，菜单/普通对话/开机全回归。

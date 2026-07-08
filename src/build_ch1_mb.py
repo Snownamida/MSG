@@ -38,6 +38,15 @@ NMI_R2 = 0x7EB95                    # NMI region-2 bank($EB85 LDA$0452;STA$0460)
 GREEN_BANK = 0xE0                   # 绿字(场景67 顶部 region2)专用 CHR bank(空闲)=bank0完整拷贝+句63中文
                                     # ★绿字读 region2($0460=$0452=0=bank0),与场景00(CONTINUE/存档)抢bank0→乱码。
                                     # 把 region2 重定向到 0xE0,bank0 保原版假名→存档屏干净,绿字照样中文。
+# ★硬骨头③:句级第二字库bank(ExRAM 钩子)。单场景bank装不下的溢出句(如187)放独立 B bank,运行时按句切换:
+#   detour $F081(读句指针例程尾,此刻 $5115 仍=句子表bank可验表)`STA $5115`→`JSR $5FA5`(等长3B);
+#   ExRAM $5FA5 例程:主表($A000首字节==0)时默认 shadow($5FFF)=$0450|0x80,$87/$88 命中 B-list→表项bank;
+#   NMI $EB7F 改 `LDA $5FFF; STA $045F`(等长6B)。ExRAM $5FA5-$5FFF 实测全章(含密语屏00)零写入;
+#   例程由 bank127(扩PRG启动副本,$5117 切走后永不执行=自由区)开机拷入 ExRAM($5104=2 仅reset设置)。
+#   共显安全:实测选话题时对话框先清屏(菜单开着时框已空),深话题句独占屏幕,B bank 只需固定字+该句字。
+B_SENTS = {187: 0xA1}     # 句号→B bank(空闲 $A1 起;bank=bank0拷贝+固定/名字字全局码+该句独有字)
+DETOUR = 0x7F091          # file: $F081 `STA $5115`(8D 15 51)
+BANK127 = 0xFE010         # file: 扩PRG末8KB=bank63启动副本
 # 空闲区（与 reinsert_full 一致，勿撞 0x74000-0x75B00 的 bank58 立绘/头像指针表！）：
 # text 串(每 block 1 字节，量小)放 0x73604-0x74000 真空闲区；句子 block 流放扩 PRG(0x76000+)。
 TEXT_FREE = (0x73604, 0x74000)      # block 的 1 字节 text 串（string_pointer 可达，避开立绘数据）
@@ -143,9 +152,10 @@ _prg[-0x2000:] = rom[0x10 + 0x80000 - 0x2000:0x10 + 0x80000]   # 新PRG末8KB = 
 _chr = bytearray(rom[0x10 + 0x80000:0x10 + 0x100000]) + bytes(0x80000)
 rom = bytearray(rom[:0x10]) + _prg + _chr
 
-# NMI 单点改：对话框字库 bank = $0450 | 0x80（替代原 B 命门硬编码 128）
+# NMI 单点改：对话框字库 bank = ExRAM shadow $5FFF（硬骨头③:默认 $0450|0x80,B句时=B bank;
+# 替代上一版 `ORA #$80` 硬映射——shadow 由 $5FA5 例程按当前句维护）
 assert rom[NMI2:NMI2 + 6] == bytes([0xAD, 0x51, 0x04, 0x8D, 0x5F, 0x04]), rom[NMI2:NMI2 + 6].hex()
-rom[NMI2:NMI2 + 6] = bytes([0x09, 0x80, 0x8D, 0x5F, 0x04, 0xEA])   # ORA #$80; STA $045F; NOP
+rom[NMI2:NMI2 + 6] = bytes([0xAD, 0xFF, 0x5F, 0x8D, 0x5F, 0x04])   # LDA $5FFF; STA $045F
 
 # ★绿字重定向(Phase 2 已解):绿字=场景67 顶部 strip,其 bank 来自 $0452(经 $EB58 `LDA $0450,X` X=2),
 # 恒=0=bank0,与场景00 密语屏抢 bank0→乱码。实测 region2($0452/$0460)全程为0、仅场景67 在顶部渲染,
@@ -154,6 +164,83 @@ rom[NMI2:NMI2 + 6] = bytes([0x09, 0x80, 0x8D, 0x5F, 0x04, 0xEA])   # ORA #$80; S
 # 其他场景 X=0 读 $0450 不受影响;bank0 保原版假名→密语屏干净。绿字与场景00 从此各用各的 bank。
 assert rom[NMI_R2:NMI_R2 + 6] == bytes([0xAD, 0x52, 0x04, 0x8D, 0x60, 0x04]), rom[NMI_R2:NMI_R2 + 6].hex()
 rom[NMI_R2:NMI_R2 + 6] = bytes([0xA9, GREEN_BANK, 0x8D, 0x52, 0x04, 0xEA])   # LDA #GREEN_BANK; STA $0452; NOP
+
+# ★硬骨头③ 三件套(设计见文件头 B_SENTS 注释;ExRAM 空隙/清屏行为均已实测验证):
+# ② detour:$F081 `STA $5115`→`JSR $5FA5`。$F06F-$F084 = "经($87)读句指针3字节"核心例程(bank63),
+#   每句显示必经;detour 点在恢复 $5115 之前,故例程内可用 $A000 首字节验"当前映射=主表bank0"。
+assert rom[DETOUR:DETOUR + 3] == bytes([0x8D, 0x15, 0x51]), rom[DETOUR:DETOUR + 3].hex()
+rom[DETOUR:DETOUR + 3] = bytes([0x20, 0xA5, 0x5F])   # JSR $5FA5
+# ③ ExRAM payload(0x5B=91B → $5FA5-$5FFF):例程64B + pad + B-list@$5FE8 + shadow@$5FFF。
+#   寄存器契约:A/X 压栈保存;出口 PLA 使 N/Z 与原 `LDA $7E` 一致(调用方可能依赖)。
+#   ★范围守卫 $88∈[$BC,$C0):$F06F 例程是通用"经($87)读3字节",渲染期间 $87 复用指向其他表、
+#   某些 bank 首字节恰好=0——没有守卫时默认分支会在 B 句显示中途把 shadow 重置回 A bank→乱码
+#   (实测:187 加载时 $5FFF=$A1 正确,80帧后被打回 $8B,页面变错bank乱字)。
+_hook = bytes([
+    0x48,              # PHA            (A=$7E 待恢复值)
+    0x8A, 0x48,        # TXA; PHA
+    0xAD, 0x00, 0xA0,  # LDA $A000      主表bank0 首字节=$00
+    0xD0, 0x34,        # BNE done       非主表(追加表$36等)不动 shadow
+    0xA5, 0x88,        # LDA $88        ★守卫:指针高位∈[$BC,$C0) 才是句子表读
+    0xC9, 0xBC,        # CMP #$BC
+    0x90, 0x2E,        # BCC done
+    0xC9, 0xC0,        # CMP #$C0
+    0xB0, 0x2A,        # BCS done
+    0xAD, 0x50, 0x04,  # LDA $0450
+    0x09, 0x80,        # ORA #$80
+    0x8D, 0xFF, 0x5F,  # STA $5FFF      默认=场景 A bank
+    0xA2, 0x00,        # LDX #$00
+    0xBD, 0xE8, 0x5F,  # loop: LDA $5FE8,X   (ptrHi)
+    0xF0, 0x1B,        # BEQ done       0=表尾
+    0xC5, 0x88,        # CMP $88
+    0xD0, 0x12,        # BNE next
+    0xA5, 0x87,        # LDA $87        ★±2容差:引擎显示期间会以表项+1/+2偏移重读
+    0x38,              # SEC            (实测:187显示中 $87=$BEE4/5 的读把精确匹配打回默认)
+    0xFD, 0xE9, 0x5F,  # SBC $5FE9,X    ($87 - ptrLo)
+    0xC9, 0x03,        # CMP #$03
+    0xB0, 0x08,        # BCS next       差≥3 → 非本表项
+    0xBD, 0xEA, 0x5F,  # LDA $5FEA,X    (bank)
+    0x8D, 0xFF, 0x5F,  # STA $5FFF      命中→B bank
+    0xD0, 0x05,        # BNE done       (bank≠0 恒成立;跳过 next 的 INX×3+BNE=5B)
+    0xE8, 0xE8, 0xE8,  # next: INX ×3
+    0xD0, 0xE0,        # BNE loop       (X≠0 恒成立,表尾兜底)
+    0x68, 0xAA,        # done: PLA; TAX
+    0x68,              # PLA            (A=$7E,N/Z 同原 LDA $7E)
+    0x8D, 0x15, 0x51,  # STA $5115      被 detour 顶掉的原指令
+    0x60,              # RTS
+])
+assert len(_hook) == 0x43, hex(len(_hook))
+_blist = b""
+for _n, _bk in sorted(B_SENTS.items()):
+    _pf = R0.sentence_pointer(_n)
+    assert _pf < 0x2010, f"B句{_n}指针不在主表bank0(追加表句待扩)"
+    _pc = 0xA000 + _pf - 0x10       # 句指针表项 CPU 地址(bank0@$A000)——直接由 msgtool 换算,免 off-by-one
+    assert (_pc & 0xFF) <= 0xFD, f"B句{_n}表项跨页(容差匹配不支持)"
+    _blist += bytes([_pc >> 8, _pc & 0xFF, _bk])
+assert len(_blist) <= 0x15, "B-list 超容(≤7句)"
+_payload = _hook + _blist + bytes(0x17 - len(_blist)) + bytes([0x80])
+assert len(_payload) == 0x5B
+# ④ bank127 开机 shim:上电 $5117=$FF→$E000=bank127(我们的副本)。把副本里 $E9B1 的
+#   `LDA #$BE; STA $5114`(5B) 改 `JMP $E800`;$E800 blob 把 payload($E820)拷入 ExRAM $5FA5
+#   (此刻 $5104=2 已设,NMI/IRQ 未开),补执行被顶掉的指令,再 `JMP $E9B6` 跳回原封不动的
+#   `LDA #$BF; STA $5117`——★切换必须发生在原位置:STA $5117 一执行 $E000 即切到 bank63,
+#   下一条指令从 bank63 同地址取;仅当切换点后内容两 bank 一致(副本未改处)才能无缝交接。
+#   (教训:曾把切换搬进 shim 尾部→切换后从 bank63 $E812 取指=无关代码→上电即崩。)
+#   bank127 除启动路径外永不执行→blob/payload 随便放;bank63 本尊保持原样。
+assert rom[BANK127 + 0x9B1:BANK127 + 0x9B6] == bytes([0xA9, 0xBE, 0x8D, 0x14, 0x51]), "bank127 reset 副本异常"
+rom[BANK127 + 0x9B1:BANK127 + 0x9B6] = bytes([0x4C, 0x00, 0xE8, 0xEA, 0xEA])   # JMP $E800
+_shim = bytes([
+    0xA2, 0x00,        # LDX #$00
+    0xBD, 0x20, 0xE8,  # l: LDA $E820,X
+    0x9D, 0xA5, 0x5F,  # STA $5FA5,X
+    0xE8,              # INX
+    0xE0, 0x5B,        # CPX #$5B
+    0xD0, 0xF5,        # BNE l
+    0xA9, 0xBE,        # LDA #$BE
+    0x8D, 0x14, 0x51,  # STA $5114      被顶掉的原指令($5114=PRG0 bank)
+    0x4C, 0xB6, 0xE9,  # JMP $E9B6      回原切换指令(bank127/63 同内容→无缝)
+])
+rom[BANK127 + 0x800:BANK127 + 0x800 + len(_shim)] = _shim
+rom[BANK127 + 0x820:BANK127 + 0x820 + 0x5B] = _payload
 
 # 场景分组装箱：CG 切换/紧密相邻的场景合并成组，组内所有 bank 共享同一字集+码位——跨 CG 或跨
 # 场景显示的句在组内任何 bank 都有字、码位一致。开场组{0A,30,67}(机甲/通电/异变CG互切)、
@@ -214,6 +301,7 @@ for n in sorted(tr):
     # ★场景00(CONTINUE/存档/密语系统屏)的句绝不改写:它用 bank0 原版假名字库渲染,且密语=假名输入,
     #   翻成中文会毁掉存档功能。保持原版日文(句15/17/19/20 等 gui_scene==0x00 的句)。
     if gui_scene.get(n) == 0x00: continue
+    if n in B_SENTS: continue   # ★B句走独立第二bank(硬骨头③),不占场景组码池
     if n in gui_scene and (n <= 156 or 173 <= n <= 216): group_sents[group_of(gui_scene[n])].append(n)
 include = []
 group_chars = defaultdict(set)
@@ -245,7 +333,7 @@ for g, sents in group_sents.items():
         include.append(n)
         group_chars[g] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
 include.sort()
-skipped = [n for n in tr if n not in include]
+skipped = [n for n in tr if n not in include and n not in B_SENTS]
 
 scene_c2c = {}
 for g, chars in group_chars.items():
@@ -270,6 +358,25 @@ for g, chars in group_chars.items():
             rom[CHR0 + fb * 4096 + code * 16: CHR0 + fb * 4096 + code * 16 + 16] = glyph8x8(ch)
         scene_c2c[sc] = c2c
     print(f"组 {[f'${s:02X}' for s in sorted(g)]}: 独有{len(srt)} 用到名字{len(used_names)} 可用{len(avail)}")
+
+# ★硬骨头③:B句独立字库 bank + 专属 c2c。固定字/名字保全局码(与 A bank 同码位→切换瞬间共显安全),
+# 该句独有字独占整个剩余码池(独立bank无同屏竞争;实测选话题先清屏,深话题句独占屏幕)。
+b_c2c = {}
+for _n, _bank in sorted(B_SENTS.items()):
+    if _n not in tr: continue
+    _used_names = visible_chars(tr[_n]) & name_chars
+    _own = sorted(visible_chars(tr[_n]) - set(PUNCT_REUSE) - fixed_chars - name_chars)
+    assert len(_own) <= len(rest_pool), f"B句{_n}独有字{len(_own)}超单bank码池{len(rest_pool)}"
+    _c = dict(PUNCT_REUSE)
+    for ch in cross_chars: _c[ch] = fixed_code[ch]
+    for nm in _used_names: _c[nm] = name_code[nm]
+    for code, ch in zip(rest_pool, _own): _c[ch] = code
+    rom[CHR0 + _bank * 4096: CHR0 + _bank * 4096 + 4096] = rom[CHR0:CHR0 + 4096]   # bank0 拷贝
+    for ch, code in _c.items():
+        if ch in PUNCT_REUSE: continue
+        rom[CHR0 + _bank * 4096 + code * 16: CHR0 + _bank * 4096 + code * 16 + 16] = glyph8x8(ch)
+    b_c2c[_n] = _c
+    print(f"B句{_n}: bank ${_bank:02X} 独有字{len(_own)} 名字{len(_used_names)}")
 
 # ★ bank0 保持原版满字库不污染(修复场景00 密语/存档屏)。原 build 把整场景67(~104字)灌进 bank0
 # 导致密语屏乱码,已删。绿字(句63 顶部 region)现回退为原版日文(读 bank0 原版假名)。
@@ -354,8 +461,8 @@ def orig_leading_gap(n):
 
 
 done = 0
-for n in include:
-    text = tr[n]; c2c = scene_c2c[gui_scene[n]]; bs = bytearray(); i = 0
+for n in include + sorted(b_c2c):
+    text = tr[n]; c2c = b_c2c.get(n) or scene_c2c[gui_scene[n]]; bs = bytearray(); i = 0
     gap = orig_leading_gap(n); gap_pending = True
     while i < len(text):
         if gap_pending and text[i] in (" ", "　"):

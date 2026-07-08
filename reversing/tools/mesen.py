@@ -51,18 +51,24 @@ end
 
 
 def run_lua(lua_code, rom, timeout=90, cwd=None):
-    """在 testrunner 里跑 Lua，返回 stdout。lua_code 自动带 PRELUDE。"""
+    """在 testrunner 里跑 Lua，返回 stdout。lua_code 自动带 PRELUDE。
+    ★stdout 走临时文件而非管道:实测 Mesen stdout 接 subprocess 管道会静默零输出/挂死
+    (文件重定向/终端均正常,根因未明);文件重定向是可靠通路。"""
     full = PRELUDE + "\n" + lua_code
     with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False) as f:
         f.write(full)
         path = f.name
+    outp = path + ".out"
     try:
-        r = subprocess.run([MESEN, "--testrunner", rom, path],
-                           capture_output=True, text=True, timeout=timeout,
+        with open(outp, "w") as fo:
+            subprocess.run([MESEN, "--testrunner", rom, path],
+                           stdout=fo, stderr=subprocess.DEVNULL, timeout=timeout,
                            cwd=cwd or os.path.dirname(os.path.abspath(rom)))
-        return r.stdout
+        with open(outp, encoding="utf-8", errors="replace") as fi:
+            return fi.read()
     finally:
         os.unlink(path)
+        if os.path.exists(outp): os.unlink(outp)
 
 
 def extract_pngs(stdout, outdir, prefix="shot"):
