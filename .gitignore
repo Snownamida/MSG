@@ -15,7 +15,6 @@ translation/struct_full.tsv
 docs/CHAPTER1.md
 reversing/data/chapter_map.json
 reversing/data/chapter_map.md
-reversing/data/chapter1*
 
 # 实验性 PoC / 预览截图与日志
 patch_poc.py
