@@ -57,7 +57,7 @@ local co=coroutine.create(function()
       emu.loadSavestate(ent); yf(12)
     end
   end
-  yf(40); print("== 海边(0B)白盒菜单树 =="); explore(0,"0B"); print("TREE_DONE")
+  yf(40); local sc=string.format("%02X",rd(0x0450)); print("== 场景"..sc.."白盒菜单树 =="); explore(0,sc); print("TREE_DONE")
 end)
 local loaded=false; local fin=false
 emu.addMemoryCallback(function()
