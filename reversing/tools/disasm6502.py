@@ -83,9 +83,13 @@ def disasm(data, base, limit=None):
         op = data[i]; addr = base + i
         mn, mode = _OPS.get(op, ("???", "imp"))
         ln = _LEN[mode]
-        ops = [data[i + 1 + k] for k in range(ln) if i + 1 + k < len(data)]
-        raw = " ".join(f"{data[i + k]:02X}" for k in range(min(1 + ln, len(data) - i)))
-        text = f"{mn} {_fmt(mode, addr, ops)}".strip() if op in _OPS else f".db ${op:02X}"
+        if op not in _OPS or i + 1 + ln > len(data):   # 未知opcode或末尾操作数不全
+            out.append((addr, f"{op:02X}", f".db ${op:02X}"))
+            i += 1
+            continue
+        ops = [data[i + 1 + k] for k in range(ln)]
+        raw = " ".join(f"{data[i + k]:02X}" for k in range(1 + ln))
+        text = f"{mn} {_fmt(mode, addr, ops)}".strip()
         out.append((addr, raw, text))
         i += 1 + ln
     return out
