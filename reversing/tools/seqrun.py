@@ -120,6 +120,22 @@ local function option_view(opt,rep,dont_reset)
     if not dont_reset then while opt[i] do wait_ready(); while rd(0x2C)~=0 do press_opt("up",1); wait_ready() end; press_opt("B",1); i=i-1 end end
   end
 end
+-- 错误输入(第二章 V-MH/MH 制造编号方向格):先等就绪 $15==0xFF,再按方向序列
+local function wi(seq)
+  while rd(0x15)~=0xFF do fa() end
+  for _,b in ipairs(seq) do press(b); fa(); fa() end
+end
+local function wi_VMH() wi({"up","right","up","right","up","A"}) end
+local function wi_MH()  wi({"up","right","up","A"}) end
+-- 推过 CG 过场($0200=FF,如穿梭机发射):按 A 推进,直到菜单就绪或对话页(不靠 wait_ready 的短超时)
+local function advance_cg(maxf)
+  local f0=frame
+  while (frame-f0)<(maxf or 6000) do
+    if rd(0x17)==0x10 or rd(0x0200)==0xF0 then return true end
+    if (frame-f0)%30<3 then press("A") else fa() end
+  end
+  return false
+end
 
 -- 步骤表(照搬 mesen_gui_scenetrace 的前进序列,每行=一步,可续跑)
 local STEPS={
@@ -137,6 +153,25 @@ local STEPS={
   function() press_opt("down",3); press_opt("A",1); next_para(1) end,
   function() wait_ready(); press_opt("A",1); wait_ready() end,
   function() option_view({3},1,true) end,
+  -- ===== 第二章 stage_2_1(机场探索;步15起)=====
+  function() advance_cg(); press_opt("A",1); next_para(2); option_view({1},1); option_view({2,1},2); option_view({3,1},1,true); option_view({1,1},1); option_view({2,1},1,true) end,                              -- 15 穿梭机CG→机场太空+moonface
+  function() option_view({1,1},1); option_view({2,1},1); option_view({2,2},1); option_view({3,1},1,true); option_view({1,1},6); option_view({1,2},1); option_view({2},1,true) end,                                    -- 16 调查moonface+驾驶室
+  function() option_view({1,1},1); option_view({1,2},1); option_view({2,2},1,true); option_view({1,1},1,true); press_opt("A",1); next_para("to_next_option"); option_view({1,1},1); option_view({2,1},1,true) end,     -- 17 登机+调查561+station bay
+  function() option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); option_view({2,2},1); option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); press_opt("down",1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(1); wi_VMH(); wi_VMH(); wi_VMH(); next_para("to_next_option") end,  -- 18 data room+调查前台(V-MH输入)
+  function() option_view({1,1},1); option_view({1,2},1); option_view({2,1},1,true); option_view({1,1},1); option_view({2,1},1); option_view({2,2},1,true); option_view({2,1},1); option_view({2,2},1,true) end,       -- 19 调查561+moonface+驾驶室
+  function() option_view({1,1},1); option_view({2,1},1); option_view({2,2},1,true); option_view({1,1},1); option_view({2,1},1); option_view({2,3},1); option_view({2,1},1); option_view({2,2},2); option_view({1,1},2); option_view({1,1},1); option_view({1,1},4) end,  -- 20 main floor+sub floor
+  function() option_view({1,1},1); option_view({1,2},2); option_view({2,1},2); option_view({2,2},1); option_view({2,3},1); option_view({1,1},1); option_view({1,2},1); option_view({1,1},2); option_view({1,2},1); option_view({1,3},1); option_view({2,1},1); option_view({2,2},1); option_view({1,1},2,true) end,  -- 21 data office+mechanic
+  function() option_view({1,1},1); option_view({1,2},1,true); option_view({1,1},1,true); option_view({2},2); option_view({1},2); option_view({3},1,true); option_view({1,2},1,true); option_view({1,1},2); option_view({1,2},2); option_view({2},1); option_view({3},1,true); option_view({1,3},1,true) end,  -- 22 data office+mechanic
+  function() option_view({1},1); press_opt("down",2); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); wait_ready(); option_view({2,1},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3},1,true); option_view({1,1},1); option_view({2,1},1,true) end,  -- 23 上船+调查驾驶室
+  function() option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); option_view({2,2},1); option_view({3},1,true); option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); option_view({2,2},1); press_opt("down",1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(12) end,  -- 24 调查
+  function() option_view({1,1},3); option_view({2,1},5); option_view({2,2},1); option_view({2,3},4); option_view({3},2); option_view({2,3},1,true); option_view({1,1},1,true); option_view({1,1},1); option_view({2},1,true); option_view({1,1,1},1); option_view({1,1,2},2); option_view({2},2); option_view({3},1,true); option_view({1,2},1,true); press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para(1); option_view({1,1},1,true); wait_ready(); press_opt("A",1); next_para("to_next_option") end,  -- 25 希尔琪奴
+  function() option_view({1,1},1); option_view({2,1},1,true); option_view({1},1); option_view({2},1); option_view({3},1,true); press_opt("down",1); press_opt("A",1); next_para("to_next_option"); press_opt("A",1); next_para(15); option_view({1,2},1); option_view({1,1},4); option_view({1,1},1,true); option_view({1,2},3,true); option_view({1,1},2); option_view({1,2},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3},1); option_view({1,4},1); option_view({2},1,true); option_view({1,3},1,true); option_view({1,1},1,true); press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); wait_ready(); option_view({1,1},1,true) end,  -- 26 回到bay(stage_2_1完)
+  -- ===== 第二章 stage_2_2 =====
+  function() option_view({1,1},1); option_view({2,1},1,true); option_view({1,1},2); option_view({2,1},1); option_view({2,2},1); option_view({3,1},1,true); option_view({1,1},1); option_view({1,2},2); option_view({2,1},1); option_view({2,2},3); option_view({3},1,true) end,  -- 27
+  function() option_view({1,1},1); option_view({1,2},1); option_view({2},1,true); option_view({1,2},1); option_view({1,1},1); option_view({2,1},1,true); option_view({1,1},1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(3); press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para(1); option_view({1,3},1,true) end,  -- 28
+  function() option_view({1,1},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3,1},2); option_view({1,3,2},5); option_view({2},1,true); option_view({1,1},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3},1); option_view({2},1,true) end,  -- 29
+  function() option_view({1,2},4); option_view({1,3},4); option_view({1,4},4); option_view({1,1},6); option_view({1,1},1,true); option_view({2,1},4); option_view({2,2},4); option_view({2,3},4); option_view({2,4},4); option_view({1},1,true) end,  -- 30
+  function() option_view({1},2); option_view({2},2); option_view({3},3); option_view({4},3); option_view({3},3); option_view({3},1,true); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para("to_next_option") end,  -- 31 女服务员(stage_2_2完=第二章末)
 }
 
 co=coroutine.create(function()
