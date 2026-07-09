@@ -38,18 +38,31 @@ def script_entry(sn, base):
     b0, b1, b2 = ROM[_off(pb, pa):_off(pb, pa) + 3]
     return b0 | 0x80, b1 | ((b2 + 0xA0) << 8)
 
-def extract_dialogue(sn, base=BASE_BEACH, count=40):
-    """库0句号 → 演出脚本反汇编 + 对话句号序列。返回 (脚本bank, 脚本addr, [(addr,句号)...])。"""
+def extract_dialogue(sn, base=BASE_BEACH, count=200, max_gap=50):
+    """库0句号 → 演出脚本反汇编 + 对话句号序列。返回 (脚本bank, 脚本addr, [(addr,句号)...])。
+
+    B791 等演出区是"剧情句子按号线性存储"的数据段:段内句号连续、段间大跳(=不同剧情)。
+    实际演出播哪段由运行时控制流决定(脚本流本质)→ 这里用 max_gap 截取入口所在的连续剧情段
+    (句号跳变超 max_gap 即认为跨到别段,停)。给出该段全部对话;实际播放范围需动态确定。
+    """
     sb, sa = script_entry(sn, base)
     ins = disasm_script(sb, sa, count)
-    dlg = [(a, snn) for a, c, raw, snn in ins if snn is not None]
+    dlg = []
+    prev = None
+    for a, c, raw, snn in ins:
+        if snn is None:
+            continue
+        if prev is not None and abs(snn - prev) > max_gap:
+            break
+        dlg.append((a, snn))
+        prev = snn
     return sb, sa, dlg
 
 
 if __name__ == "__main__":
     sn = int(sys.argv[1], 0)
     base = BASE_BEACH
-    count = 40
+    count = 200
     for i, a in enumerate(sys.argv):
         if a == "--base": base = [int(x, 16) for x in sys.argv[i + 1].split()]
         if a == "--count": count = int(sys.argv[i + 1])
