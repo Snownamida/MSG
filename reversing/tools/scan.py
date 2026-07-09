@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 同目录 dis6502
-from dis6502 import PRG, CHR, CDL_PRG, CDL_CHR
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # 同目录 nesrom
+from nesrom import PRG, CHR, CDL_PRG, CDL_CHR
 
 def bank_of(off): return off // 0x2000  # 8KB bank index
 

@@ -24,10 +24,9 @@ src/          汉化构建工具链（从项目根运行）
 roms/         ROM 与 .cdl（gitignored）
 docs/         结构化知识库 ↓
 reversing/
-  tools/           逆向工具（dis6502 反汇编、mesen 无头驱动、seqrun/play/crawler…）
-  senmap/          句子地图爬虫（菜单树 DFS）
+  tools/           通用工具（disasm6502 指令反汇编、nesrom ROM/CHR/CDL 解析、mesen 无头驱动、seqrun）
+  senmap/          遍历 + 白盒反编译（动态 traverse/audit · 静态 scriptdis/autoscript/scandump）
   data/            trace / 场景映射 / 句子地图产物
-lua/          Mesen Lua 脚本（GUI/无头 trace、自动游玩）
 fonts/        Fusion Pixel Font（OFL，随仓库）
 translation/  译文（结构化定稿 struct_full + flat 草稿）+ 术语表
 archive/      历史脚本存档（不再维护）
@@ -35,9 +34,12 @@ archive/      历史脚本存档（不再维护）
 
 ## 文档（`docs/`）
 
+完整知识地图与阅读路径见 **[docs/README.md](docs/README.md)**。
+
 | 文档 | 内容 |
 |---|---|
 | [TEXT_SYSTEM.md](docs/TEXT_SYSTEM.md) | 文本系统：两级字典压缩、编码、控制码、数据流 |
+| [SCRIPT_ENGINE.md](docs/SCRIPT_ENGINE.md) | 脚本/对话演出引擎、白盒反编译工具链（选项→对话可纯静态提取）|
 | [ENGINE.md](docs/ENGINE.md) | 渲染引擎：MMC5、tile 几何、例程地图、分屏、两套 emit |
 | [MEMMAP.md](docs/MEMMAP.md) | 逐字节内存 / 寄存器映射表 |
 | [LOCALIZATION.md](docs/LOCALIZATION.md) | 汉化实现方案（字模 / bank / 回写 / 密语），当前限制 |
@@ -54,8 +56,8 @@ python3 src/msgtool.py map
 # 构建第一章汉化 ROM（→ roms/MSG-zh-demo.nes）
 python3 src/build_ch1_mb.py
 
-# 无头逆向观测（需 Mesen.app）
-python3 reversing/tools/play.py --shot out.png
+# 白盒反编译：纯静态提取演出对话（需 Mesen.app）
+python3 reversing/senmap/autoscript.py 94
 ```
 
 脚本用 `ROOT` 锚定（`__file__` 相对定位），可从任意目录运行。仅需 Python 3.9+；
