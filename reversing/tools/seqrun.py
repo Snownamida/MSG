@@ -38,8 +38,8 @@ emu.addMemoryCallback(function()
   if p>=0xBCB5 and p<0xBFFF and rd(0xA000)==prg(0) then n=(p-0xBCB5)//3
   elseif p>=0xA000 and p<0xBD4B and rd(0xA000)==prg(0x2000) then n=(p-0xA000)//3+281 end
   if n and n~=lastN then lastN=n; lastN_frame=frame; print(string.format("N\t%d\t%02X", n, rd(0x0450))) end
-  -- ★NRAW:指针变化即记(A000/A001指纹+ptr+场景)→宿主用块串起始反查表映射真实句号,深句可靠
-  if p~=lastptr and p>=0xA000 then lastptr=p
+  -- ★NRAW:指针变化即记(A000/A001指纹+ptr+场景)→宿主反查真实句号,深句可靠。极频繁→仅 QA_SHOTS 开(否则拖慢到超时)
+  if __SHOTS__==1 and p~=lastptr and p>=0xA000 then lastptr=p
     print(string.format("NRAW\t%02X\t%02X\t%04X\t%02X", rd(0xA000), rd(0xA001), p, rd(0x0450)))
   end
 end, emu.callbackType.exec, 0xF071, 0xF071)
@@ -80,7 +80,7 @@ emu.addMemoryCallback(function()
     -- 记录显示时字库 bank $045F 与场景 $0450:字库应=($0450|0x80),不等则跨场景乱码
     local sc=rd(0x0450); local fb=rd(0x045F); local p=rd(0x87)+rd(0x88)*256
     print(string.format("PAGE n=%d ptr=%04X A000=%02X scene=%02X font=%02X expect=%02X %s", lastN, p, rd(0xA000), sc, fb, (sc|0x80), (fb==(sc|0x80)) and "OK" or "MISMATCH"))
-    local png=emu.takeScreenshot(); print("SHOT_START s"..lastN.."_"..string.format("%02X",sc)); print(_hex(png)); print("SHOT_END")
+    if __SHOTS__==1 then local png=emu.takeScreenshot(); print("SHOT_START s"..lastN.."_"..string.format("%02X",sc)); print(_hex(png)); print("SHOT_END") end
   end
   if not REPORTED and (CKPT or SEQ_DONE or frame>=CAP+3000) then
     REPORTED=true
@@ -122,7 +122,8 @@ local function option_view(opt,rep,dont_reset)
 end
 -- 错误输入(第二章 V-MH/MH 制造编号方向格):先等就绪 $15==0xFF,再按方向序列
 local function wi(seq)
-  while rd(0x15)~=0xFF do fa() end
+  local w=0
+  while rd(0x15)~=0xFF do fa(); w=w+1; if w>4000 then return end end  -- 超时防挂(输入屏没出现)
   for _,b in ipairs(seq) do press(b); fa(); fa() end
 end
 local function wi_VMH() wi({"up","right","up","right","up","A"}) end
@@ -153,25 +154,7 @@ local STEPS={
   function() press_opt("down",3); press_opt("A",1); next_para(1) end,
   function() wait_ready(); press_opt("A",1); wait_ready() end,
   function() option_view({3},1,true) end,
-  -- ===== 第二章 stage_2_1(机场探索;步15起)=====
-  function() advance_cg(); press_opt("A",1); next_para(2); option_view({1},1); option_view({2,1},2); option_view({3,1},1,true); option_view({1,1},1); option_view({2,1},1,true) end,                              -- 15 穿梭机CG→机场太空+moonface
-  function() option_view({1,1},1); option_view({2,1},1); option_view({2,2},1); option_view({3,1},1,true); option_view({1,1},6); option_view({1,2},1); option_view({2},1,true) end,                                    -- 16 调查moonface+驾驶室
-  function() option_view({1,1},1); option_view({1,2},1); option_view({2,2},1,true); option_view({1,1},1,true); press_opt("A",1); next_para("to_next_option"); option_view({1,1},1); option_view({2,1},1,true) end,     -- 17 登机+调查561+station bay
-  function() option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); option_view({2,2},1); option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); press_opt("down",1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(1); wi_VMH(); wi_VMH(); wi_VMH(); next_para("to_next_option") end,  -- 18 data room+调查前台(V-MH输入)
-  function() option_view({1,1},1); option_view({1,2},1); option_view({2,1},1,true); option_view({1,1},1); option_view({2,1},1); option_view({2,2},1,true); option_view({2,1},1); option_view({2,2},1,true) end,       -- 19 调查561+moonface+驾驶室
-  function() option_view({1,1},1); option_view({2,1},1); option_view({2,2},1,true); option_view({1,1},1); option_view({2,1},1); option_view({2,3},1); option_view({2,1},1); option_view({2,2},2); option_view({1,1},2); option_view({1,1},1); option_view({1,1},4) end,  -- 20 main floor+sub floor
-  function() option_view({1,1},1); option_view({1,2},2); option_view({2,1},2); option_view({2,2},1); option_view({2,3},1); option_view({1,1},1); option_view({1,2},1); option_view({1,1},2); option_view({1,2},1); option_view({1,3},1); option_view({2,1},1); option_view({2,2},1); option_view({1,1},2,true) end,  -- 21 data office+mechanic
-  function() option_view({1,1},1); option_view({1,2},1,true); option_view({1,1},1,true); option_view({2},2); option_view({1},2); option_view({3},1,true); option_view({1,2},1,true); option_view({1,1},2); option_view({1,2},2); option_view({2},1); option_view({3},1,true); option_view({1,3},1,true) end,  -- 22 data office+mechanic
-  function() option_view({1},1); press_opt("down",2); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); wait_ready(); option_view({2,1},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3},1,true); option_view({1,1},1); option_view({2,1},1,true) end,  -- 23 上船+调查驾驶室
-  function() option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); option_view({2,2},1); option_view({3},1,true); option_view({1,1},1); option_view({1,2},1); option_view({2,1},1); option_view({2,2},1); press_opt("down",1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(12) end,  -- 24 调查
-  function() option_view({1,1},3); option_view({2,1},5); option_view({2,2},1); option_view({2,3},4); option_view({3},2); option_view({2,3},1,true); option_view({1,1},1,true); option_view({1,1},1); option_view({2},1,true); option_view({1,1,1},1); option_view({1,1,2},2); option_view({2},2); option_view({3},1,true); option_view({1,2},1,true); press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para(1); option_view({1,1},1,true); wait_ready(); press_opt("A",1); next_para("to_next_option") end,  -- 25 希尔琪奴
-  function() option_view({1,1},1); option_view({2,1},1,true); option_view({1},1); option_view({2},1); option_view({3},1,true); press_opt("down",1); press_opt("A",1); next_para("to_next_option"); press_opt("A",1); next_para(15); option_view({1,2},1); option_view({1,1},4); option_view({1,1},1,true); option_view({1,2},3,true); option_view({1,1},2); option_view({1,2},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3},1); option_view({1,4},1); option_view({2},1,true); option_view({1,3},1,true); option_view({1,1},1,true); press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); wait_ready(); option_view({1,1},1,true) end,  -- 26 回到bay(stage_2_1完)
-  -- ===== 第二章 stage_2_2 =====
-  function() option_view({1,1},1); option_view({2,1},1,true); option_view({1,1},2); option_view({2,1},1); option_view({2,2},1); option_view({3,1},1,true); option_view({1,1},1); option_view({1,2},2); option_view({2,1},1); option_view({2,2},3); option_view({3},1,true) end,  -- 27
-  function() option_view({1,1},1); option_view({1,2},1); option_view({2},1,true); option_view({1,2},1); option_view({1,1},1); option_view({2,1},1,true); option_view({1,1},1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(3); press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para(1); option_view({1,3},1,true) end,  -- 28
-  function() option_view({1,1},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3,1},2); option_view({1,3,2},5); option_view({2},1,true); option_view({1,1},1,true); option_view({1,1},1); option_view({1,2},1); option_view({1,3},1); option_view({2},1,true) end,  -- 29
-  function() option_view({1,2},4); option_view({1,3},4); option_view({1,4},4); option_view({1,1},6); option_view({1,1},1,true); option_view({2,1},4); option_view({2,2},4); option_view({2,3},4); option_view({2,4},4); option_view({1},1,true) end,  -- 30
-  function() option_view({1},2); option_view({2},2); option_view({3},3); option_view({4},3); option_view({3},3); option_view({3},1,true); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para("to_next_option") end,  -- 31 女服务员(stage_2_2完=第二章末)
+__STAGE2_STEPS__
 }
 
 co=coroutine.create(function()
@@ -193,6 +176,76 @@ end)
 """
 
 
+# 第二章 stage_2_1+stage_2_2 扁平 op 列表(照搬原始 FCEUX 自动化.lua;option_view 可断点,press/next/wi 组原子)
+STAGE2_OPS = [
+    "advance_cg()", 'press_opt("A",1)', "next_para(2)",
+    "option_view({1},1)", "option_view({2,1},2)", "option_view({3,1},1,true)",
+    "option_view({1,1},1)", "option_view({2,1},1,true)",                                                  # moonface
+    "option_view({1,1},1)", "option_view({2,1},1)", "option_view({2,2},1)", "option_view({3,1},1,true)",  # 调查moonface
+    "option_view({1,1},6)", "option_view({1,2},1)", "option_view({2},1,true)",                            # 驾驶室
+    "option_view({1,1},1)", "option_view({1,2},1)",                                                       # 登机
+    "option_view({2,2},1,true)",                                                                          # 调查561
+    "option_view({1,1},1,true)", 'press_opt("A",1); next_para("to_next_option")',
+    "option_view({1,1},1)", "option_view({2,1},1,true)",                                                  # station bay
+    "option_view({1,1},1)", "option_view({1,2},1)", "option_view({2,1},1)", "option_view({2,2},1)",       # data room
+    "option_view({1,1},1)", "option_view({1,2},1)", "option_view({2,1},1)",                               # 调查前台
+    'press_opt("down",1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(1); wi_VMH(); wi_VMH(); wi_VMH(); next_para("to_next_option")',  # V-MH输入
+    "option_view({1,1},1)", "option_view({1,2},1)", "option_view({2,1},1,true)",                          # 调查561
+    "option_view({1,1},1)", "option_view({2,1},1)", "option_view({2,2},1,true)",                          # 调查moonface
+    "option_view({2,1},1)", "option_view({2,2},1,true)",                                                  # 驾驶室
+    "option_view({1,1},1)", "option_view({2,1},1)", "option_view({2,2},1,true)",                          # main floor
+    "option_view({1,1},1)", "option_view({2,1},1)", "option_view({2,3},1)", "option_view({2,1},1)", "option_view({2,2},2)", "option_view({1,1},2)", "option_view({1,1},1)", "option_view({1,1},4)",  # sub floor
+    "option_view({1,1},1)", "option_view({1,2},2)", "option_view({2,1},2)", "option_view({2,2},1)", "option_view({2,3},1)", "option_view({1,1},1)", "option_view({1,2},1)",  # data office
+    "option_view({1,1},2)", "option_view({1,2},1)", "option_view({1,3},1)", "option_view({2,1},1)", "option_view({2,2},1)", "option_view({1,1},2,true)",  # mechanic
+    "option_view({1,1},1)", "option_view({1,2},1,true)", "option_view({1,1},1,true)", "option_view({2},2)", "option_view({1},2)", "option_view({3},1,true)", "option_view({1,2},1,true)",  # data office
+    "option_view({1,1},2)", "option_view({1,2},2)", "option_view({2},1)", "option_view({3},1,true)", "option_view({1,3},1,true)",  # mechanic
+    "option_view({1},1)", 'press_opt("down",2); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); wait_ready()',  # 上船
+    "option_view({2,1},1,true)", "option_view({1,1},1)", "option_view({1,2},1)", "option_view({1,3},1,true)",
+    "option_view({1,1},1)", "option_view({2,1},1,true)",                                                  # 调查驾驶室
+    "option_view({1,1},1)", "option_view({1,2},1)", "option_view({2,1},1)", "option_view({2,2},1)", "option_view({3},1,true)",  # 调查
+    "option_view({1,1},1)", "option_view({1,2},1)", "option_view({2,1},1)", "option_view({2,2},1)",
+    'press_opt("down",1); press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(12)',
+    "option_view({1,1},3)", "option_view({2,1},5)", "option_view({2,2},1)", "option_view({2,3},4)", "option_view({3},2)", "option_view({2,3},1,true)",  # 希尔琪奴
+    "option_view({1,1},1,true)", "option_view({1,1},1)", "option_view({2},1,true)", "option_view({1,1,1},1)", "option_view({1,1,2},2)", "option_view({2},2)", "option_view({3},1,true)", "option_view({1,2},1,true)",
+    'press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para(1)',
+    "option_view({1,1},1,true)", 'wait_ready(); press_opt("A",1); next_para("to_next_option")',
+    "option_view({1,1},1)", "option_view({2,1},1,true)", "option_view({1},1)", "option_view({2},1)", "option_view({3},1,true)",  # 回到bay
+    'press_opt("down",1); press_opt("A",1); next_para("to_next_option"); press_opt("A",1); next_para(15)',
+    "option_view({1,2},1)", "option_view({1,1},4)", "option_view({1,1},1,true)", "option_view({1,2},3,true)", "option_view({1,1},2)", "option_view({1,2},1,true)",
+    "option_view({1,1},1)", "option_view({1,2},1)", "option_view({1,3},1)", "option_view({1,4},1)", "option_view({2},1,true)", "option_view({1,3},1,true)", "option_view({1,1},1,true)",
+    'press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); wait_ready()',
+    "option_view({1,1},1,true)",
+    # ===== stage_2_2 =====
+    "option_view({1,1},1)", "option_view({2,1},1,true)", "option_view({1,1},2)", "option_view({2,1},1)", "option_view({2,2},1)", "option_view({3,1},1,true)",
+    "option_view({1,1},1)", "option_view({1,2},2)", "option_view({2,1},1)", "option_view({2,2},3)", "option_view({3},1,true)",
+    "option_view({1,1},1)", "option_view({1,2},1)", "option_view({2},1,true)", "option_view({1,2},1)", "option_view({1,1},1)", "option_view({2,1},1,true)", "option_view({1,1},1)",
+    'press_opt("A",1); press_opt("down",1); press_opt("A",1); next_para(3); press_opt("down",1); press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para(1)',
+    "option_view({1,3},1,true)", "option_view({1,1},1,true)", "option_view({1,1},1)", "option_view({1,2},1)", "option_view({1,3,1},2)", "option_view({1,3,2},5)", "option_view({2},1,true)",
+    "option_view({1,1},1,true)", "option_view({1,1},1)", "option_view({1,2},1)", "option_view({1,3},1)", "option_view({2},1,true)",
+    "option_view({1,2},4)", "option_view({1,3},4)", "option_view({1,4},4)", "option_view({1,1},6)", "option_view({1,1},1,true)", "option_view({2,1},4)", "option_view({2,2},4)", "option_view({2,3},4)", "option_view({2,4},4)", "option_view({1},1,true)",
+    "option_view({1},2)", "option_view({2},2)", "option_view({3},3)", "option_view({4},3)", "option_view({3},3)", "option_view({3},1,true)",  # 女服务员
+    'press_opt("A",1); next_para(1); wait_ready(); press_opt("A",1); next_para("to_next_option")',
+]
+
+
+def _gen_stage2_steps():
+    """把 STAGE2_OPS 按权重切成小步(每步≤5导航单元,只在 option_view 后断),生成 Lua 步函数。"""
+    import re as _re
+    def w(op):
+        m = _re.search(r"option_view\(\{[^}]*\},(\d+)", op)
+        if m: return int(m.group(1))
+        if "next_para(12)" in op or "next_para(15)" in op: return 2
+        if "wi_VMH" in op: return 3
+        return 1
+    steps, cur, cw = [], [], 0
+    for op in STAGE2_OPS:
+        cur.append(op); cw += w(op)
+        if op.startswith("option_view") and cw >= 5:
+            steps.append(cur); cur, cw = [], 0
+    if cur: steps.append(cur)
+    return "\n".join("  function() " + "; ".join(s) + " end,  -- 第二章步" + str(i) for i, s in enumerate(steps))
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     rom = os.path.join(os.path.dirname(os.path.dirname(here)), "roms", os.environ.get("ROM", "MSG-zh-demo.nes"))
@@ -202,8 +255,11 @@ def main():
     hexs = open(state).read().strip() if state and os.path.exists(state) else ""
     cap = os.environ.get("SEQ_CAP", "16000")
     savescenes = "1" if os.environ.get("SAVE_SCENES") else "0"
-    lua = (LUA.replace("__NMI__", str(NMI)).replace("__START_HEX__", hexs)
-           .replace("__START_STEP__", step).replace("__CAP__", cap).replace("__SAVESCENES__", savescenes))
+    shots = "1" if os.environ.get("QA_SHOTS") else "0"
+    lua = (LUA.replace("__STAGE2_STEPS__", _gen_stage2_steps())
+           .replace("__NMI__", str(NMI)).replace("__START_HEX__", hexs)
+           .replace("__START_STEP__", step).replace("__CAP__", cap).replace("__SAVESCENES__", savescenes)
+           .replace("__SHOTS__", shots))
     out = run_lua(lua, rom, timeout=int(int(cap) / 130) + 50)
     # 每场景入口 checkpoint → scene_ckpt/<hex>
     ckdir = os.path.join(W, "scene_ckpt"); os.makedirs(ckdir, exist_ok=True)
