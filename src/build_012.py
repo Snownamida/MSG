@@ -275,9 +275,11 @@ for g, sents in group_sents.items():
     chars = set()
     for n in mainline: chars |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
     keep = list(mainline)
+    _is_ch2 = any(n in CH2_SENTS for n in revisit)   # 第二章场景:保句号前缀,首个装不下即停→溢出=连续后缀→B-list run少
     for n in revisit:
         nc = chars | (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
         if len(nc) <= avail_g: keep.append(n); chars = nc
+        elif _is_ch2: break
     if os.environ.get("DIAG"):   # 诊断:全部显示句(主线+回访)的需求 vs 容量→溢出量+溢出字
         full = set()
         for n in mainline + revisit: full |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
@@ -293,9 +295,30 @@ for g, sents in group_sents.items():
         include.append(n)
         group_chars[g] |= (visible_chars(tr[n]) - set(PUNCT_REUSE) - fixed_chars)
 include.sort()
-# ★012 Phase2 待办(溢出句→B bank):发现更深——第二章句多 >281,指针在 bank1 句表(_pf≥0x2010),
-# 硬骨头③ B-list 仅支持 bank0(assert _pf<0x2010)。需先扩钩子支持 bank1/追加表三表分派 + 解决表放置
-# (91B安全区仅够代码~85B,表须另置于可映射空闲区)。详见 docs/CH2_PACKING_PLAN.md。
+
+# ★012 Phase2:第二章贪心丢弃的溢出句 → 自动分 B bank(泛化硬骨头③;bank0/bank1 都支持)。
+# 每场景溢出句(句号序,≈后半段=句号连续)独占其 B bank→句表匹配区段(run)少;每 bank 独有字 ≤ rest_pool。
+# B_SENTS 追加后交给下面的 b_c2c 循环(字模)+ 表驱动钩子(逐句→bank,表放 ExRAM $5C00)。
+_ch2_over = sorted(n for n in CH2_SENTS if n not in include and n not in B_SENTS and gui_scene.get(n) != 0x00)
+_used_b = ({s | 0x80 for s in gui_scene.values()} | {(s | 0xC0) & 0xFF for s in gui_scene.values()}
+           | set(B_SENTS.values()) | {GREEN_BANK, 0x00})
+_bpool = iter([b for b in range(0xA0, 0x100) if b not in _used_b])
+DEEP_SENTS = set()   # 单句独有字>码池(超长独白,物理装不下单bank)→专属bank0拷贝bank=日文保底
+# ★全局句号序滚动分配(不按场景重置):连续句号溢出句尽量同 bank → B-list run 少(表放 ExRAM 有限)。
+# 句号跳变(中间有已装句)或超预算 → 新 bank。共显安全:溢出=深话题独占屏幕(选话题先清屏)。
+_cur, _cc, _prev = None, set(), None
+for _n in _ch2_over:   # 已按句号排序
+    _c = visible_chars(tr[_n]) - set(PUNCT_REUSE) - fixed_chars
+    if len(_c) > len(rest_pool):   # 单句超预算 → 深bank保底(不重编码→留日文)
+        _db = next(_bpool); B_SENTS[_n] = _db; DEEP_SENTS.add(_n)
+        rom[CHR0 + _db * 4096:CHR0 + _db * 4096 + 4096] = rom[CHR0:CHR0 + 4096]  # bank0拷贝=原版日文字库
+        _cur = None; continue
+    if _cur is None or len(_cc | _c) > len(rest_pool):
+        _cur = next(_bpool); _cc = set()
+    _cc |= _c; B_SENTS[_n] = _cur; _prev = _n
+_ov_bpacked = [n for n in _ch2_over if n not in DEEP_SENTS]
+print(f"Phase2 溢出装箱:{len(_ov_bpacked)}句→B bank(中文) + {len(DEEP_SENTS)}句→深bank(超长独白留日文): {sorted(DEEP_SENTS)}")
+
 skipped = [n for n in tr if n not in include and n not in B_SENTS]
 
 scene_c2c = {}
@@ -327,7 +350,7 @@ for g, chars in group_chars.items():
 b_c2c = {}
 _bank_sents = defaultdict(list)
 for _n, _bank in B_SENTS.items():
-    if _n in tr: _bank_sents[_bank].append(_n)
+    if _n in tr and _n not in DEEP_SENTS: _bank_sents[_bank].append(_n)   # DEEP句用bank0拷贝(日文),不注入c2c
 for _bank, _ns in sorted(_bank_sents.items()):
     _used_names, _own = set(), set()
     for _n in _ns:
@@ -455,65 +478,74 @@ rom[DETOUR:DETOUR + 3] = bytes([0x20, 0xA5, 0x5F])   # JSR $5FA5
 #   守卫依据(187显示中实测指针流):文本表读 sig36+$88≥$BD4C、其他表读 sig≠36 或 $88<$BC,
 #   均被上述条件精确排除;寄存器契约:X/Y 不动,出口 LDA $7E 复刻原指令的 A 与 N/Z。
 def _asm_hook_v2():
-    # B_SENTS → 连续 slot 区段 [hi, loStart, span, bank]。span=3×句数:每 slot 表项恰 3 字节,
-    # "±2容差"=表项内偏移(引擎以 +1/+2 重读),已含在 3 内——★勿再加 2,会罩进下一 slot
-    # 误伤相邻句(tr[188]/tr[208] 曾因此被误路由 B bank)。
+    # ★012 表驱动版:B_SENTS(bank0+bank1溢出句)→表项区段[hi,lo,span,bank],表放 ExRAM $5C00(全场景实测空闲、
+    # 固定CPU地址→无视$5115直读)。span=3×句数(含引擎±偏移重读,勿再加2)。
+    # bank0句(_pf<0x2010)表项CPU=$A000+(_pf-0x10)∈$BCB5+;bank1句(≥0x2010)=$A000+(_pf-0x2010)∈$A000+。
     runs = []
     for _n, _bk in sorted(B_SENTS.items()):
         _pf = R0.sentence_pointer(_n)
-        assert _pf < 0x2010, f"B句{_n}不在主表bank0(追加表深句走深bank默认,无需挂B)"
-        _pc = 0xA000 + _pf - 0x10   # 表项 CPU 地址——由 msgtool 直接换算,免 off-by-one
-        if runs and runs[-1][3] == _bk and (_pc >> 8) == runs[-1][0] and (_pc & 0xFF) == runs[-1][1] + runs[-1][2]:
-            runs[-1][2] += 3        # 与前项连续同bank → 并段
+        _pc = 0xA000 + (_pf - 0x10 if _pf < 0x2010 else _pf - 0x2010)
+        _hi, _lo = _pc >> 8, _pc & 0xFF
+        # 并段:同bank+同页+句号连续+并后不跨页(8位SBC/CMP匹配不能跨页wrap)。否则起新段。
+        if (runs and runs[-1][3] == _bk and _hi == runs[-1][0]
+                and _lo == runs[-1][1] + runs[-1][2] and runs[-1][1] + runs[-1][2] + 3 <= 0x100):
+            runs[-1][2] += 3
         else:
-            assert (_pc & 0xFF) <= 0xF8, f"B句{_n}表项跨页"
-            runs.append([_pc >> 8, _pc & 0xFF, 3, _bk])
-    code = bytearray(); fix = []                    # fix: 待回填 done 的分支偏移位
-    def _b(op): code.extend([op, 0x00]); fix.append(len(code) - 1)
-    code += bytes([0xAD, 0x00, 0xA0])               # LDA $A000
-    code += bytes([0xF0, 0x00]); _main = len(code) - 1   # BEQ main
-    code += bytes([0xC9, 0x36]); _b(0xD0)           # CMP #$36; BNE done(其他表bank)
-    code += bytes([0xA5, 0x88, 0xC9, 0xBD]); _b(0xB0)   # LDA $88; CMP #$BD; BCS done(文本表$BD4C+)
-    code += bytes([0xAD, 0x50, 0x04, 0x09, 0xC0, 0x8D, 0xFF, 0x5F])  # 深bank: $0450|$C0 → shadow
-    _b(0xD0)                                        # BNE done(值≥$C0 恒真)
-    code[_main] = len(code) - (_main + 1)           # main:
-    code += bytes([0xA5, 0x88, 0xC9, 0xBC]); _b(0x90)   # LDA $88; CMP #$BC; BCC done(非句表读)
-    code += bytes([0xAD, 0x50, 0x04, 0x09, 0x80, 0x8D, 0xFF, 0x5F])  # 默认 A bank
-    for _i, (hi, lo, span, bk) in enumerate(runs):
-        code += bytes([0xA5, 0x88, 0xC9, hi, 0xD0, 0x00]); _n1 = len(code) - 1   # ≠hi → next
-        code += bytes([0xA5, 0x87, 0x38, 0xE9, lo, 0xC9, span, 0xB0, 0x00]); _n2 = len(code) - 1  # lo距≥span → next
-        code += bytes([0xA9, bk, 0x8D, 0xFF, 0x5F])                                # 命中 → B bank
-        if _i + 1 < len(runs): _b(0xD0)             # BNE done(bk≠0 恒真;末块直接落 done)
-        code[_n1] = len(code) - (_n1 + 1); code[_n2] = len(code) - (_n2 + 1)       # next:
-    for p in fix: code[p] = len(code) - (p + 1)     # done:
-    code += bytes([0xA5, 0x7E, 0x8D, 0x15, 0x51, 0x60])   # LDA $7E; STA $5115; RTS
-    assert len(code) <= 0x5A, f"hook v2 超长 {len(code)}B>90(B块过多,减 B_SENTS 连续段数)"
-    return bytes(code)
-_hook = _asm_hook_v2()
+            runs.append([_hi, _lo, 3, _bk])
+    table = bytearray()
+    for hi, lo, span, bk in runs: table += bytes([hi, lo, span, bk])
+    table += bytes([0x00])                          # 哨兵 hi=0
+    assert len(table) <= 0xA0, f"B-list表{len(table)}B超$5C60-$5CFF(160B安全区);减run/B块"
+    # 三表分派 + 表驱动循环:
+    #   sig=$00(bank0,句1-281,表项hi≥$BC)→默认$0450|$80+查表
+    #   sig=$36(bank1,句282+):$88<$A5(282-~715=第二章)→默认$0450|$80+查表;≥$A5(>704第三章+/未译)→深bank$0450|$C0
+    #   其他 sig→done(不改shadow)
+    c = bytearray(); fix = []
+    def _b(op): c.extend([op, 0x00]); fix.append(len(c) - 1)
+    c += bytes([0xAD, 0x00, 0xA0])                  # LDA $A000 (sig)
+    c += bytes([0xF0, 0x00]); _b0j = len(c) - 1     # BEQ b0
+    c += bytes([0xC9, 0x36]); _b(0xD0)              # CMP #$36; BNE done(非bank1)
+    c += bytes([0xA5, 0x88, 0xC9, 0xA5, 0x90, 0x00]); _dfltj = len(c) - 1   # LDA$88;CMP#$A5;BCC dflt(第二章282-704→默认$80+查表)
+    c += bytes([0xC9, 0xBD]); _b(0xB0)              # CMP#$BD;BCS done(≥$BD→done=原版行为,不误设深bank污染shadow)
+    c += bytes([0xAD, 0x50, 0x04, 0x09, 0xC0, 0x8D, 0xFF, 0x5F]); _b(0xD0)  # [$A5,$BD)第三章+未译→深bank$0450|$C0;BNE done
+    c[_b0j] = len(c) - (_b0j + 1)                   # b0:
+    c += bytes([0xA5, 0x88, 0xC9, 0xBC]); _b(0x90)  # LDA$88;CMP#$BC;BCC done(非句表)
+    c[_dfltj] = len(c) - (_dfltj + 1)               # dflt:(b0 落到此,bank1第二章跳到此)
+    c += bytes([0xAD, 0x50, 0x04, 0x09, 0x80, 0x8D, 0xFF, 0x5F])   # 默认 $0450|$80
+    c += bytes([0xA2, 0x00]); _tl = len(c)          # LDX #0; tl:  (表在 ExRAM $5C60)
+    c += bytes([0xBD, 0x60, 0x5C]); _b(0xF0)        # LDA $5C60,X; BEQ done(哨兵)
+    c += bytes([0xC5, 0x88, 0xD0, 0x00]); _tn1 = len(c) - 1                 # CMP $88; BNE tn
+    c += bytes([0xA5, 0x87, 0x38, 0xFD, 0x61, 0x5C, 0xDD, 0x62, 0x5C, 0xB0, 0x00]); _tn2 = len(c) - 1  # LDA$87;SEC;SBC$5C61,X;CMP$5C62,X;BCS tn
+    c += bytes([0xBD, 0x63, 0x5C, 0x8D, 0xFF, 0x5F]); _b(0xD0)              # LDA$5C63,X;STA$5FFF;BNE done
+    _tn = len(c)                                    # tn:
+    c[_tn1] = _tn - (_tn1 + 1); c[_tn2] = _tn - (_tn2 + 1)
+    c += bytes([0x8A, 0x18, 0x69, 0x04, 0xAA])      # TXA;CLC;ADC #4;TAX
+    c += bytes([0x4C, 0x00, 0x00]); _jmp = len(c) - 2   # JMP tl(绝对,回填)
+    for p in fix: c[p] = len(c) - (p + 1)           # done:
+    c += bytes([0xA5, 0x7E, 0x8D, 0x15, 0x51, 0x60])    # LDA$7E;STA$5115;RTS
+    _tgt = 0x5FA5 + _tl; c[_jmp] = _tgt & 0xFF; c[_jmp + 1] = _tgt >> 8
+    assert len(c) <= 0x5A, f"hook表驱动 {len(c)}B>90;精简"
+    print(f"Phase2 表驱动钩子:{len(runs)}个run,表{len(table)}B(≤80),钩子{len(c)}B(≤90)")
+    return bytes(c), bytes(table)
+_hook, _table = _asm_hook_v2()
 _payload = _hook + bytes(0x5A - len(_hook)) + bytes([0x80])
 assert len(_payload) == 0x5B
-# ④ bank127 开机 shim:上电 $5117=$FF→$E000=bank127(我们的副本)。把副本里 $E9B1 的
-#   `LDA #$BE; STA $5114`(5B) 改 `JMP $E800`;$E800 blob 把 payload($E820)拷入 ExRAM $5FA5
-#   (此刻 $5104=2 已设,NMI/IRQ 未开),补执行被顶掉的指令,再 `JMP $E9B6` 跳回原封不动的
-#   `LDA #$BF; STA $5117`——★切换必须发生在原位置:STA $5117 一执行 $E000 即切到 bank63,
-#   下一条指令从 bank63 同地址取;仅当切换点后内容两 bank 一致(副本未改处)才能无缝交接。
-#   (教训:曾把切换搬进 shim 尾部→切换后从 bank63 $E812 取指=无关代码→上电即崩。)
-#   bank127 除启动路径外永不执行→blob/payload 随便放;bank63 本尊保持原样。
+# ④ bank127 开机 shim:上电 $5117=$FF→$E000=bank127(副本)。$E9B1 `LDA#$BE;STA$5114` 改 `JMP $E800`;
+#   $E800 shim 把 hook($E840)拷入 ExRAM $5FA5 + 表($E8A0)拷入 $5C00,补被顶指令,`JMP $E9B6` 回原切换点。
 assert rom[BANK127 + 0x9B1:BANK127 + 0x9B6] == bytes([0xA9, 0xBE, 0x8D, 0x14, 0x51]), "bank127 reset 副本异常"
 rom[BANK127 + 0x9B1:BANK127 + 0x9B6] = bytes([0x4C, 0x00, 0xE8, 0xEA, 0xEA])   # JMP $E800
 _shim = bytes([
-    0xA2, 0x00,        # LDX #$00
-    0xBD, 0x20, 0xE8,  # l: LDA $E820,X
-    0x9D, 0xA5, 0x5F,  # STA $5FA5,X
-    0xE8,              # INX
-    0xE0, 0x5B,        # CPX #$5B
-    0xD0, 0xF5,        # BNE l
-    0xA9, 0xBE,        # LDA #$BE
-    0x8D, 0x14, 0x51,  # STA $5114      被顶掉的原指令($5114=PRG0 bank)
-    0x4C, 0xB6, 0xE9,  # JMP $E9B6      回原切换指令(bank127/63 同内容→无缝)
+    0xA2, 0x00,                    # LDX #$00
+    0xBD, 0x40, 0xE8, 0x9D, 0xA5, 0x5F, 0xE8, 0xE0, 0x5B, 0xD0, 0xF5,  # l1: hook $E840→$5FA5 (0x5B)
+    0xA2, 0x00,                    # LDX #$00
+    0xBD, 0xA0, 0xE8, 0x9D, 0x60, 0x5C, 0xE8, 0xE0, len(_table), 0xD0, 0xF5,  # l2: 表 $E8A0→$5C60
+    0xA9, 0xBE, 0x8D, 0x14, 0x51,  # LDA #$BE; STA $5114(被顶掉的原指令)
+    0x4C, 0xB6, 0xE9,              # JMP $E9B6(回原切换点,bank127/63 同内容→无缝)
 ])
+assert len(_shim) <= 0x40, f"shim {len(_shim)}B 超 0x40(撞 payload)"
 rom[BANK127 + 0x800:BANK127 + 0x800 + len(_shim)] = _shim
-rom[BANK127 + 0x820:BANK127 + 0x820 + 0x5B] = _payload
+rom[BANK127 + 0x840:BANK127 + 0x840 + 0x5B] = _payload   # →$5FA5
+rom[BANK127 + 0x8A0:BANK127 + 0x8A0 + len(_table)] = _table   # →$5C00
 
 for n in include + sorted(b_c2c):
     text = tr[n]; c2c = b_c2c.get(n) or scene_c2c[gui_scene[n]]; bs = bytearray(); i = 0
