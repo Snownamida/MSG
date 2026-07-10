@@ -240,7 +240,7 @@ def _gen_stage2_steps():
     steps, cur, cw = [], [], 0
     for op in STAGE2_OPS:
         cur.append(op); cw += w(op)
-        if op.startswith("option_view") and cw >= 5:
+        if op.startswith("option_view") and cw >= 4:
             steps.append(cur); cur, cw = [], 0
     if cur: steps.append(cur)
     return "\n".join("  function() " + "; ".join(s) + " end,  -- 第二章步" + str(i) for i, s in enumerate(steps))
@@ -276,6 +276,12 @@ def main():
     with open(os.path.join(W, "scene_map.tsv"), "a") as f:
         for ln in nlines:
             f.write(ln + "\n")
+    # ★PAGE 显示时刻场景(稳定对话帧的 $0450,比 N\t 的读指针时刻准)→ page_map.tsv(句号→显示场景),供装箱用真显示场景
+    import re as _re
+    with open(os.path.join(W, "page_map.tsv"), "a") as f:
+        for ln in out.splitlines():
+            m = _re.match(r"PAGE n=(\d+) .*scene=([0-9A-Fa-f]{2})", ln)
+            if m: f.write(f"P\t{m.group(1)}\t{m.group(2).upper()}\n")
     # ★NRAW 原始采样(A001/A001/ptr/scene)→ nraw.tsv,供宿主反查表映射真实句号(深句可靠)
     rawlines = [ln for ln in out.splitlines() if ln.startswith("NRAW\t")]
     with open(os.path.join(W, "nraw.tsv"), "a") as f:

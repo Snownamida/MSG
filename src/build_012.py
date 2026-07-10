@@ -299,6 +299,9 @@ include.sort()
 # ★012 Phase2:第二章贪心丢弃的溢出句 → 自动分 B bank(泛化硬骨头③;bank0/bank1 都支持)。
 # 每场景溢出句(句号序,≈后半段=句号连续)独占其 B bank→句表匹配区段(run)少;每 bank 独有字 ≤ rest_pool。
 # B_SENTS 追加后交给下面的 b_c2c 循环(字模)+ 表驱动钩子(逐句→bank,表放 ExRAM $5C00)。
+# ★012 跨场景句(遍历实测在>1场景显示,如查看子视图共享描述)残留问题:它们在非 gui_scene 场景显示时
+# 读到该场景默认bank→缺字乱码(如句637在1F子视图)。全走B bank会爆表(82句→66run>容量40),
+# 全局码会爆预算。留作 #19 QA refinement(见 ch2_cross.txt)。当前:按 gui_scene 主场景装箱。
 _ch2_over = sorted(n for n in CH2_SENTS if n not in include and n not in B_SENTS and gui_scene.get(n) != 0x00)
 _used_b = ({s | 0x80 for s in gui_scene.values()} | {(s | 0xC0) & 0xFF for s in gui_scene.values()}
            | set(B_SENTS.values()) | {GREEN_BANK, 0x00})
